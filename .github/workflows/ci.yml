@@ -1,0 +1,114 @@
+name: CI
+
+# The repository backstop for the Verify phase. Local pre-commit hooks and
+# /review-check can be bypassed (--no-verify, forgetting to run them); the
+# quality, hygiene, and dependency-audit jobs run on every pull request.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Least privilege: all jobs only read the checkout and run tooling — no
+# writes, no secrets. Declared explicitly so a consumer whose org default
+# is "read and write" does not inherit an over-privileged CI token.
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      # The four gate steps run through the toolchain runner, the same
+      # entry point the Stop hook and /review-check use, so CI and the local
+      # gate cannot disagree about which tools run. Separate steps keep a
+      # red run readable: the failing step names the tool.
+      - name: Install dependencies
+        run: bash .agentic/toolchain.sh install
+
+      - name: Lint
+        run: bash .agentic/toolchain.sh lint
+
+      - name: Format check
+        run: bash .agentic/toolchain.sh format-check
+
+      - name: Type-check
+        run: bash .agentic/toolchain.sh typecheck
+
+      - name: Tests
+        run: bash .agentic/toolchain.sh test
+
+  hygiene:
+    # Client-independent public-repository backstop. Run the non-quality
+    # pre-commit hooks against the complete tree so --no-verify cannot bypass
+    # secret, private-key, malformed YAML/TOML, merge-marker, large-file, or
+    # AGENTS/CLAUDE import checks. Ruff and mypy already have dedicated steps.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run public-repo and client-contract checks
+        env:
+          SKIP: no-commit-to-branch,ruff,ruff-format,mypy
+        run: uv run pre-commit run --all-files
+
+  closeout:
+    # Close-tasks backstop. A feature PR carries its own bookkeeping — the
+    # spec's **Status:** flip, the regenerated dashboard, the current-state
+    # note — so one merge completes the work. Without a gate that rule gets
+    # skipped and the bookkeeping becomes a second, wasted PR.
+    #
+    # pull_request only: on a push to main the branch name is gone, and the
+    # question is meaningless once merged. Silent on chore branches and on
+    # projects that do not use docs/specs.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check feature close-tasks rode the PR
+        run: bash .agentic/hooks/closeout-check.sh
+
+  audit:
+    # Supply-chain backstop: scan the locked dependency tree for known
+    # CVEs. Separate from the quality job so its failure reads as
+    # "security advisory", not "lint/test broke", and so it runs in
+    # parallel. Dependabot (.github/dependabot.yml) opens the fix PRs;
+    # this gate makes a shipped advisory visible instead of silent.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync
+
+      # `--with` adds pip-audit to the run ephemerally, so it sees the
+      # project's installed deps without becoming a permanent dev
+      # dependency. For an unfixable transitive advisory with no patched
+      # release yet, ignore it explicitly and leave a comment saying why:
+      #   uv run --with pip-audit pip-audit --ignore-vuln GHSA-xxxx-xxxx-xxxx
+      - name: Audit dependencies for known advisories (pip-audit)
+        run: uv run --with pip-audit pip-audit

@@ -1,0 +1,68 @@
+# Mac-side OTel agent. Runs on the laptop, listens on localhost only, buffers to disk,
+# forwards to the telemetry VM whenever it is reachable (LAN or Tailscale).
+# Clients (Claude Code, Codex, your apps) always point at localhost:4318, never at the VM.
+# Validate:  otelcol-contrib validate --config otel-agent.yaml
+
+extensions:
+  file_storage:
+    directory: ${env:HOME}/.local/state/otel-agent
+    create_directory: true
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 127.0.0.1:4317
+      http:
+        endpoint: 127.0.0.1:4318
+
+processors:
+  memory_limiter:
+    check_interval: 5s
+    limit_mib: 300
+    spike_limit_mib: 60
+  resource:
+    attributes:
+      - key: host.name
+        value: ${env:HOSTNAME}
+        action: upsert
+  batch:
+    timeout: 5s
+
+exporters:
+  # Forward to the VM. The persistent sending queue survives restarts and keeps
+  # retrying while the VM is unreachable, so an offline day is queued, not lost.
+  otlphttp/vm:
+    endpoint: http://telemetry.example:4318
+    tls: { insecure: true }
+    sending_queue:
+      enabled: true
+      storage: file_storage
+      queue_size: 20000
+    retry_on_failure:
+      enabled: true
+      initial_interval: 10s
+      max_interval: 5m
+      max_elapsed_time: 0      # never give up; the queue is the cap
+  # Local copy regardless of connectivity. Same JSONL shape as the VM archive.
+  file/local:
+    path: ${env:HOME}/.local/state/otel-agent/archive/otel.jsonl
+    format: json
+    compression: zstd
+    rotation: { max_megabytes: 64, max_days: 365, max_backups: 1000 }
+
+service:
+  extensions: [file_storage]
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlphttp/vm, file/local]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlphttp/vm, file/local]
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlphttp/vm, file/local]

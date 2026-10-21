@@ -1,0 +1,54 @@
+# Telemetry VM services. Nothing here is exposed beyond LAN/Tailnet.
+# Grafana runs on the existing monitoring VM and queries these three stores.
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.163.1
+    command: ["--config=/etc/otelcol/config.yaml"]
+    restart: unless-stopped
+    volumes:
+      - ./otel-collector.yaml:/etc/otelcol/config.yaml:ro
+      - ${TELEMETRY_ROOT}/archive:/archive
+      - ${TELEMETRY_ROOT}/inbox:/inbox:ro
+      - ${TELEMETRY_ROOT}/collector-state:/state
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "13133:13133" # health
+    depends_on: [victoriametrics, loki]
+
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:v1.154.1
+    command:
+      - "-storageDataPath=/victoria"
+      - "-retentionPeriod=5y"
+      - "-httpListenAddr=:8428"
+      # Prometheus-style names (claude_code_cost_usage_USD_total) so shared Grafana
+      # dashboards built for Prometheus work unchanged; resource attributes are
+      # promoted to labels by default.
+      - "-opentelemetry.usePrometheusNaming=true"
+    restart: unless-stopped
+    volumes:
+      - ${TELEMETRY_ROOT}/victoria:/victoria
+    ports:
+      - "8428:8428"
+
+  loki:
+    image: grafana/loki:3.7.9
+    command: ["-config.file=/etc/loki/config.yaml"]
+    restart: unless-stopped
+    volumes:
+      - ./loki-config.yaml:/etc/loki/config.yaml:ro
+      - ${TELEMETRY_ROOT}/loki:/loki
+    ports:
+      - "3100:3100"
+
+  tempo:
+    # Optional. Comment out until something emits traces.
+    image: grafana/tempo:2.10.10
+    command: ["-config.file=/etc/tempo/config.yaml"]
+    restart: unless-stopped
+    volumes:
+      - ./tempo.yaml:/etc/tempo/config.yaml:ro
+      - ${TELEMETRY_ROOT}/tempo:/tempo
+    ports:
+      - "3200:3200"

@@ -1,0 +1,104 @@
+# Require an explicit approval for publication and history mutation.
+# `prefix_rule` has exact positional matching rather than wildcards, so list
+# the common executable paths and wrappers explicitly. Git's `-C <path>`
+# places a dynamic value before the subcommand; prompt on that global form and
+# let the shared destructive-command hook provide the narrower `clean` block.
+GIT_EXECUTABLES = [
+    "git",
+    "/bin/git",
+    "/usr/bin/git",
+    "/usr/local/bin/git",
+    "/opt/homebrew/bin/git",
+]
+
+GIT_WRAPPERS = [
+    "command",
+    "env",
+    "/bin/env",
+    "/usr/bin/env",
+    "sudo",
+]
+
+prefix_rule(
+    pattern = [GIT_EXECUTABLES, "commit"],
+    decision = "prompt",
+    justification = "AGENTS.md requires an explicit commit instruction.",
+    match = ["git commit -m message", "/usr/bin/git commit -m message"],
+    not_match = ["git status", "git -C . commit -m message"],
+)
+
+prefix_rule(
+    pattern = [GIT_WRAPPERS, GIT_EXECUTABLES, "commit"],
+    decision = "prompt",
+    justification = "AGENTS.md requires an explicit commit instruction.",
+    match = ["command git commit -m message", "/usr/bin/env git commit -m message"],
+    not_match = ["command git status"],
+)
+
+prefix_rule(
+    pattern = [GIT_EXECUTABLES, "push"],
+    decision = "prompt",
+    justification = "AGENTS.md requires an explicit push instruction.",
+    match = ["git push", "git push origin feature", "/opt/homebrew/bin/git push"],
+    not_match = ["git fetch"],
+)
+
+prefix_rule(
+    pattern = [GIT_WRAPPERS, GIT_EXECUTABLES, "push"],
+    decision = "prompt",
+    justification = "AGENTS.md requires an explicit push instruction.",
+    match = ["env git push", "sudo git push origin feature"],
+    not_match = ["env git fetch"],
+)
+
+prefix_rule(
+    pattern = [GIT_EXECUTABLES, "clean"],
+    decision = "forbidden",
+    justification = "Use git status and remove only an explicitly resolved target.",
+    match = [
+        "git clean -fd",
+        "git clean --force --directories",
+        "/usr/local/bin/git clean -fdx",
+    ],
+    not_match = ["git status"],
+)
+
+prefix_rule(
+    pattern = [GIT_WRAPPERS, GIT_EXECUTABLES, "clean"],
+    decision = "forbidden",
+    justification = "Use git status and remove only an explicitly resolved target.",
+    match = ["command git clean -fd", "/usr/bin/env git clean --force -d"],
+    not_match = ["command git status"],
+)
+
+prefix_rule(
+    pattern = [GIT_EXECUTABLES, "-C"],
+    decision = "prompt",
+    justification = "Git -C hides the later subcommand from exact-prefix rules; run from the target repository root or review the full command before approval.",
+    match = ["git -C . status", "/usr/bin/git -C /tmp/project clean -fd"],
+    not_match = ["git status"],
+)
+
+prefix_rule(
+    pattern = [GIT_WRAPPERS, GIT_EXECUTABLES, "-C"],
+    decision = "prompt",
+    justification = "Git -C hides the later subcommand from exact-prefix rules; run from the target repository root or review the full command before approval.",
+    match = ["command git -C . status", "env git -C /tmp/project clean -fd"],
+    not_match = ["command git status"],
+)
+
+prefix_rule(
+    pattern = ["gh", "repo", "delete"],
+    decision = "forbidden",
+    justification = "Repository deletion must be performed outside the agent session.",
+    match = ["gh repo delete owner/name"],
+    not_match = ["gh repo view owner/name"],
+)
+
+prefix_rule(
+    pattern = ["terraform", "destroy"],
+    decision = "forbidden",
+    justification = "Infrastructure destruction must be performed outside the agent session.",
+    match = ["terraform destroy", "terraform destroy -auto-approve"],
+    not_match = ["terraform plan"],
+)

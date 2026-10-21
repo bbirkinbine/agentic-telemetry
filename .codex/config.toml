@@ -1,0 +1,27 @@
+# Project-local Codex defaults. Codex loads this layer only after the
+# repository is trusted; CLI/session overrides still take precedence.
+project_doc_max_bytes = 65536
+approval_policy = "on-request"
+default_permissions = "agentic-workspace"
+
+[features]
+hooks = true
+multi_agent = true
+
+[agents]
+enabled = true
+
+[tui]
+status_line = ["git-branch", "model-with-reasoning", "context-remaining"]
+
+[permissions.agentic-workspace]
+description = "Workspace editing with repository secrets denied."
+extends = ":workspace"
+
+[permissions.agentic-workspace.filesystem.":workspace_roots"]
+".env" = "deny"
+".env.*" = "deny"
+"**/.env" = "deny"
+"**/.env.*" = "deny"
+"**/*.pem" = "deny"
+"**/*.key" = "deny"

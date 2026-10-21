@@ -1,0 +1,48 @@
+# OPT-IN: Claude Code PR review in CI.
+#
+# Inert as shipped — GitHub Actions ignores *.example files. To enable:
+#   1. Rename to claude-review.yml.
+#   2. Add ANTHROPIC_API_KEY to the repo's Actions secrets. This bills
+#      the API key per token (typically cents per PR) — it does NOT draw
+#      on a Claude subscription.
+#   3. Adjust the prompt below to taste.
+#
+# What it adds over ci.yml: ci.yml verifies the code is green (the gate
+# through .agentic/toolchain.sh); this reviews the diff the way the /review subagent
+# does — against the AGENTS.md contract and the spec — and posts
+# findings as PR comments. It is a third reviewer, not a replacement
+# for /review and /review-adversarial run locally before the PR.
+#
+# Docs: https://code.claude.com/docs/en/github-actions
+
+name: Claude review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            Review this pull request the way the reviewer subagent in
+            .claude/agents/reviewer.md would: check the diff against the
+            spec it references (docs/specs/), the conventions and
+            standing rules in AGENTS.md, test quality (tautologies,
+            missing edge cases), and public-repo hygiene (secrets,
+            internal hostnames, personal info). Post findings as PR
+            comments, each tagged [auto-fix], [ask-user], or [no-op].
+            Flag only correctness, requirements, and hygiene gaps — do
+            not demand speculative robustness.
+          claude_args: "--max-turns 12"

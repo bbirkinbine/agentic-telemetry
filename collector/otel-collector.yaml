@@ -1,0 +1,135 @@
+# OTel Collector for the telemetry VM.
+# Validate before first start:  otelcol-contrib validate --config otel-collector.yaml
+# Assembled from processor READMEs (vault note 06) and vendor OTLP docs; not yet run.
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+  file_storage:            # checkpoints for filelog so inbox files are never re-ingested
+    directory: /state
+    create_directory: true
+  # Optional: require a bearer token from clients (Claude Code sends
+  # OTEL_EXPORTER_OTLP_HEADERS). Verify server-side use of this extension
+  # against the installed Collector version before enabling.
+  # bearertokenauth:
+  #   token: ${env:TELEMETRY_TOKEN}
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  # Anything that cannot speak OTLP drops JSONL here (rsync from the Macs).
+  # One file per session or run; one JSON object per line.
+  filelog/inbox:
+    include: [/inbox/**/*.jsonl]
+    start_at: beginning
+    storage: file_storage
+    include_file_path: true
+    operators:
+      - type: json_parser
+        parse_from: body
+        timestamp:
+          parse_from: attributes.ts
+          layout: '%Y-%m-%dT%H:%M:%S.%LZ'
+          layout_type: strptime
+        on_error: send_quiet        # a malformed line is kept as raw text, not dropped
+      - type: regex_parser           # /inbox/<host>/<project>/<file>  ->  attributes
+        parse_from: attributes["log.file.path"]
+        regex: '^/inbox/(?P<inbox_host>[^/]+)/(?P<inbox_project>[^/]+)/'
+        on_error: send_quiet
+
+  # Scrape local model servers that expose Prometheus metrics.
+  prometheus/servers:
+    config:
+      scrape_configs:
+        - job_name: llama-swap
+          scrape_interval: 30s
+          static_configs:
+            - targets: ["gpu.example:9292"]   # placeholder; set from ENDPOINTS.md
+
+processors:
+  memory_limiter:
+    check_interval: 5s
+    limit_mib: 1500
+    spike_limit_mib: 300
+
+  resource:
+    attributes:
+      - { key: deployment.environment, value: homelab, action: upsert }
+
+  # Second redaction layer. The first is at the source (hook or SDK).
+  redaction:
+    allow_all_keys: true
+    blocked_values:
+      - 'sk-[A-Za-z0-9_-]{20,}'                   # OpenAI/Anthropic-style keys
+      - 'AKIA[0-9A-Z]{16}'                        # AWS access key id
+      - '-----BEGIN [A-Z ]*PRIVATE KEY-----'      # PEM
+      - 'gh[pousr]_[A-Za-z0-9]{36,}'              # GitHub tokens
+      - '\b[\w.+-]+@[\w-]+\.[\w.-]+\b'            # emails
+    summary: debug
+
+  transform/size:
+    log_statements:
+      - context: log
+        statements:
+          - truncate_all(attributes, 16384)
+    trace_statements:
+      - context: span
+        statements:
+          - truncate_all(attributes, 16384)
+
+  batch:
+    timeout: 5s
+    send_batch_size: 512
+
+exporters:
+  # Long-term stores. Each accepts OTLP/HTTP natively; otlphttp appends /v1/<signal>.
+  otlphttp/victoriametrics:
+    endpoint: http://victoriametrics:8428/opentelemetry
+    tls: { insecure: true }
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
+    tls: { insecure: true }
+  otlphttp/tempo:
+    endpoint: http://tempo:4318
+    tls: { insecure: true }
+
+  # The source-agnostic raw record. One rotating, compressed JSONL file per signal.
+  file/metrics:
+    path: /archive/metrics.jsonl
+    format: json
+    compression: zstd
+    rotation: { max_megabytes: 256, max_days: 3650, max_backups: 100000, localtime: false }
+  file/logs:
+    path: /archive/logs.jsonl
+    format: json
+    compression: zstd
+    rotation: { max_megabytes: 256, max_days: 3650, max_backups: 100000, localtime: false }
+  file/traces:
+    path: /archive/traces.jsonl
+    format: json
+    compression: zstd
+    rotation: { max_megabytes: 256, max_days: 3650, max_backups: 100000, localtime: false }
+
+  debug:
+    verbosity: basic
+
+service:
+  extensions: [health_check, file_storage]
+  pipelines:
+    metrics:
+      receivers: [otlp, prometheus/servers]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlphttp/victoriametrics, file/metrics]
+    logs:
+      receivers: [otlp, filelog/inbox]
+      processors: [memory_limiter, resource, redaction, transform/size, batch]
+      exporters: [otlphttp/loki, file/logs]
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, redaction, transform/size, batch]
+      exporters: [otlphttp/tempo, file/traces]

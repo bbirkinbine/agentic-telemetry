@@ -1,0 +1,62 @@
+[project]
+name = "agentic-telemetry"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = []
+
+# A build backend makes `uv sync` install src/agentic_telemetry into the venv,
+# so tests can import it. Without one uv treats the project as virtual.
+[build-system]
+requires = ["uv_build>=0.11,<0.12"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "agentic_telemetry"
+
+[dependency-groups]
+dev = [
+  "pytest>=8",
+  "pytest-asyncio",
+  "ruff>=0.15",
+  "mypy>=2.0",
+  "pre-commit",
+  # Optional verification depth — cheap when an agent does the labor.
+  # Uncomment per project once there is real logic worth the rigor:
+  # "pytest-cov",       # line-coverage report: uv run pytest --cov (CI does not gate on it)
+  # "diff-cover",       # gate coverage on the diff only (needs pytest-cov's coverage.xml)
+  # "hypothesis",       # property-based tests; pairs well with /test-first
+  # "mutmut",           # mutation testing; catches tautological test suites
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# Sensible defaults that catch agent mistakes
+select = [
+  "E", "F", "W",   # pycodestyle / pyflakes
+  "I",             # isort
+  "B",             # bugbear (catches common mistakes)
+  "UP",            # pyupgrade
+  "SIM",           # simplify
+  "RUF",           # ruff-specific
+  "ANN",           # annotations (force type hints)
+  "TID",           # tidy imports
+  "PTH",           # use pathlib
+  "S",             # flake8-bandit security checks (tests ignore S101 below)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ANN", "S101"]  # allow asserts in tests, no annotation requirement
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_ignores = true
+warn_return_any = true
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers --strict-config"
+testpaths = ["tests"]
+asyncio_mode = "auto"

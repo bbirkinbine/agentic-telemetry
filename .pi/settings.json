@@ -1,0 +1,31 @@
+{
+  "packages": [
+    {
+      "source": "npm:pi-subagents@0.76.1",
+      "autoload": false,
+      "extensions": [
+        "+./index.js"
+      ],
+      "skills": [],
+      "prompts": [],
+      "themes": []
+    }
+  ],
+  "extensions": [
+    "+./extensions/agentic-hooks.ts"
+  ],
+  "subagents": {
+    "projectRootResolution": "git-root",
+    "disableBuiltins": true,
+    "agentExcludeDirs": [
+      "../.agents"
+    ],
+    "modelScope": {
+      "enforce": true,
+      "strict": true,
+      "allow": [
+        "inherit"
+      ]
+    }
+  }
+}

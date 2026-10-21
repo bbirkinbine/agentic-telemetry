@@ -1,0 +1,15 @@
+{
+  "_comment": "Merge the env block into ~/.claude/settings.json (user scope). Export cannot be enabled from a repository's .claude/settings.json. Variable names verified against code.claude.com/docs/en/monitoring-usage on 2026-10-21. Content flags are deliberately off; OTEL_LOG_TOOL_DETAILS adds tool parameters and Bash commands, which is what the eval queries need.",
+  "cleanupPeriodDays": 365,
+  "env": {
+    "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+    "OTEL_METRICS_EXPORTER": "otlp",
+    "OTEL_LOGS_EXPORTER": "otlp",
+    "OTEL_TRACES_EXPORTER": "otlp",
+    "CLAUDE_CODE_ENHANCED_TELEMETRY_BETA": "1",
+    "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
+    "OTEL_EXPORTER_OTLP_ENDPOINT": "http://telemetry.example:4318",
+    "OTEL_LOG_TOOL_DETAILS": "1",
+    "OTEL_RESOURCE_ATTRIBUTES": "host.name=laptop.example,deployment.environment=homelab"
+  }
+}
