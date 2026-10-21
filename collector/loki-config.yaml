@@ -32,7 +32,7 @@ limits_config:
     resource_attributes:
       attributes_config:
         - action: index_label
-          attributes: [service.name, deployment.environment, inbox_host, inbox_project]
+          attributes: [service.name, deployment.environment, landing_host, landing_project]
 
 compactor:
   working_directory: /loki/compactor

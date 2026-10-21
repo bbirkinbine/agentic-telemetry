@@ -44,7 +44,7 @@ Server metrics that carry signal (llama.cpp `--metrics`, names verified 2026-10-
 | `llamacpp:requests_deferred`, `requests_processing` | queueing; a deferred request looks like a slow model from the agent side |
 | `llamacpp:n_busy_slots_per_decode` | batching; relevant once more than one worker runs |
 | `/slots` (polled, not Prometheus) | per-slot `n_ctx`, sampling params actually in effect; the ground truth for "what did the server really use" |
-| llama-swap `/logs/stream/http` | one line per request: the only per-request record at the gateway; capture to the inbox |
+| llama-swap `/logs/stream/http` | one line per request: the only per-request record at the gateway; capture to the landing zone |
 | llama-swap model swap events (upstream log) | first-request load time; shows up on the agent side as a timeout or a 600 s "thinking" |
 
 Strata and Project Maya are llama.cpp-derived; confirm which of these endpoints each

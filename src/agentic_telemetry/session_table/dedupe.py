@@ -1,6 +1,6 @@
 """Resolve two transcripts that hold the same (client, session ID).
 
-A transcript grows while its session runs, so a shorter copy (a lagged inbox
+A transcript grows while its session runs, so a shorter copy (a lagged landing
 copy, or a transcript Claude Code set aside) is a stale prefix, not a
 conflict. The longer file is kept, a warning names both paths, and the build
 never stops for it.
