@@ -2,7 +2,12 @@
 name = "agentic-telemetry"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "duckdb>=1.5.6,<2",
+]
+
+[project.scripts]
+agentic-telemetry = "agentic_telemetry.cli:main"
 
 # A build backend makes `uv sync` install src/agentic_telemetry into the venv,
 # so tests can import it. Without one uv treats the project as virtual.

@@ -22,7 +22,9 @@ matrices, and a review app for labeling runs. Private: it names homelab hosts.
 git clone git@github.com:bbirkinbine/agentic-telemetry.git
 cd agentic-telemetry
 .agentic/toolchain.sh install   # install dependencies
-# no entry point yet; see AGENTS.md → How to run things
+mkdir -p data
+uv run agentic-telemetry run-table --out data/run_table.parquet ~/src/my-project
+# one row per delegate run; see AGENTS.md → How to run things
 ```
 
 ## Repository layout

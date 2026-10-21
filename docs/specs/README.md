@@ -29,7 +29,8 @@ line; the source of truth is the spec file, this is a rendered cache. Run
 
 <!-- specs-status:start -->
 <!-- Generated block — do not edit by hand; the specs-status hook overwrites it. Source of truth is each spec's **Status:** field. -->
-_No specs yet. Run the spec workflow (`/spec <name>` in Claude or Pi, or `$spec <name>` in Codex) to create the first one; this list fills in and stays current as statuses change._
+- [0000 — agentic-telemetry](0000-product.md)  (evergreen)
+- ~~[0001 — Run Table](0001-run-table.md)~~  (shipped)
 <!-- specs-status:end -->
 
 ## Numbering
