@@ -174,7 +174,11 @@ decisions`, answer and log it as `/unattended` describes.
 - **Spec:** Before non-trivial work, create `docs/specs/NNNN-<feature>.md`
   with goal, criteria, non-goals, and external references. Use `/scope-check`
   or `/clarify`; put product direction in `0000-product.md` and costly
-  cross-cutting decisions in ADRs.
+  cross-cutting decisions in ADRs. When a roadmap unit or a spec splits into
+  parts, give each part its own four-digit spec (0003, 0004, ...) with a
+  `**Roadmap unit:** N` line and `**Depends on:**` for ordering. Do not use
+  lettered sub-specs (`0003a`) or lettered sections as work units: the status,
+  closeout and spec-resolution tooling match exactly four digits.
 - **Plan:** For Medium/Large work, or when the approach is unclear, run
   `/plan` before tests or implementation. After approval, the orchestrator
   copies its file-by-file plan verbatim into `## Approved implementation
@@ -245,8 +249,7 @@ Rules for anything that comes from outside:
 
 ## Open work / current state (updated 2026-10-21)
 
-- Bootstrapped 2026-10-21 (full profile). `collector/` and `analysis/` are design
-  drafts; the telemetry VM is not deployed.
+- Bootstrapped 2026-10-21 (full profile). `analysis/` is a design draft.
 - Product spec `docs/specs/0000-product.md` exists. Spec 0001 (run table from
   delegate ledgers, review rows, `result.json`, `state.json` and Pi transcripts)
   is shipped: `src/agentic_telemetry/run_table/` plus the `run-table` CLI. Against
@@ -261,11 +264,27 @@ Rules for anything that comes from outside:
 - Depends on the scaffold's Phase 1 tool-call ledger (separate work in the
   agentic-scaffold repo, vault prompt `Agentic Scaffold Telemetry - Agent Prompt`)
   only for the tool-call ledger reader (the rest of roadmap unit 2).
-- Next: the rest of roadmap unit 2 (tool-call ledger reader and transition failure
-  matrix) once Phase 1 lands, or unit 3 (collector VM bring-up and server-metrics join).
-  Unit 3 must revisit two 0001 defaults: a stale landing-zone copy of a run is a
-  conflict (exit 1), and a landing-zone ledger without `.agentic` takes its parent
-  directory name as `project`.
+- Spec 0003 (local collector stack) is shipped:
+  - `collector/` runs on the owner's Mac under Docker Desktop. Images are pinned
+    by multi-arch digest, and host values come from the untracked `collector/.env`
+    (template `collector/env.example`). Ports bind to `TELEMETRY_BIND_ADDR`.
+  - The archive is native-zstd OTLP JSON (`archive/<signal>.jsonl*.zst`), behind
+    an Alpha feature gate.
+  - A telemetrygen smoke test passed in all three stores and the archive.
+  - The Collector scrapes only llama-swap's own `/metrics` (`up == 1`), never
+    `/upstream/`, because that resets model TTL. The endpoint findings and the
+    stored `llamacpp_*` names are in `collector/README.md`. ADR 0002 records the
+    choice of the Grafana-stack stores.
+- Roadmap unit 3 continues in draft specs:
+  - 0004: landing-zone shipping and ledger ingestion. It also revisits two 0001
+    defaults: a stale landing-zone copy is a conflict that exits 1, and an
+    inbox-era ledger path takes `delegate` as its `project`.
+  - 0007: a scraper on the inference host for per-model `llamacpp_*` metrics.
+  - 0005: the server-metrics join. It depends on 0007 and needs a mapping from
+    ledger profile alias to llama-swap model ID.
+  - 0006: the VM deployment.
+- Next: 0004 or 0007 (both depend only on 0003), or the rest of roadmap unit 2
+  once the scaffold's Phase 1 lands.
 
 <!-- agentic-scaffold:standing-rules:start -->
 

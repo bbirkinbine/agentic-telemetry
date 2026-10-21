@@ -1,6 +1,11 @@
-# OTel Collector for the telemetry VM.
-# Validate before first start:  otelcol-contrib validate --config otel-collector.yaml
-# Assembled from processor READMEs (vault note 06) and vendor OTLP docs; not yet run.
+# OTel Collector for the telemetry stack: the same file runs on the Mac (spec 0003)
+# and on the telemetry VM (spec 0006).
+# Validate before first start, by digest and with the archive feature gate that
+# compose.yaml passes (LLAMA_SWAP_TARGET must be set; any placeholder works):
+#   docker run --rm -e LLAMA_SWAP_TARGET=gpu.example:9292 -v "$PWD/otel-collector.yaml:/c.yaml:ro" \
+#     otel/opentelemetry-collector-contrib:0.163.1@sha256:1175b03003053962012f5a231f5567f66a3e8fdb960c7835c0e48f7aa1555806 \
+#     validate --config=/c.yaml --feature-gates=exporter.file.nativeCompression
+# Assembled from the Collector component READMEs and vendor OTLP docs.
 
 extensions:
   health_check:
@@ -42,14 +47,21 @@ receivers:
         regex: '^/landing/(?P<landing_host>[^/]+)/(?P<landing_project>[^/]+)/'
         on_error: send_quiet
 
-  # Scrape local model servers that expose Prometheus metrics.
+  # Scrape the llama-swap gateway's own system and GPU metrics (needs
+  # `performance.disabled: false` on the inference host). The target is the
+  # gateway's host:port from collector/.env, passed in by compose; the real value
+  # lives in the vault's ENDPOINTS.md, never in this file.
+  # Never scrape /upstream/<model-id>/... through llama-swap: in v264 every request
+  # to a loaded model resets its idle TTL, so a 30 s scrape would keep the model
+  # loaded and hide the swap waits this stack exists to observe (spec 0003, D6).
+  # Per-model llamacpp:* metrics come from a scraper on the inference host (spec 0007).
   prometheus/servers:
     config:
       scrape_configs:
         - job_name: llama-swap
           scrape_interval: 30s
           static_configs:
-            - targets: ["gpu.example:9292"]   # placeholder; set from ENDPOINTS.md
+            - targets: ["${env:LLAMA_SWAP_TARGET}"]
 
 processors:
   memory_limiter:
@@ -98,19 +110,21 @@ exporters:
     endpoint: http://tempo:4318
     tls: { insecure: true }
 
-  # The source-agnostic raw record. One rotating, compressed JSONL file per signal.
+  # The source-agnostic raw record. One rotating file per signal: OTLP JSON lines in a
+  # standard zstd stream (feature gate exporter.file.nativeCompression, set in
+  # compose.yaml), readable with `zstd -dc`.
   file/metrics:
-    path: /archive/metrics.jsonl
+    path: /archive/metrics.jsonl.zst
     format: json
     compression: zstd
     rotation: { max_megabytes: 256, max_days: 3650, max_backups: 100000, localtime: false }
   file/logs:
-    path: /archive/logs.jsonl
+    path: /archive/logs.jsonl.zst
     format: json
     compression: zstd
     rotation: { max_megabytes: 256, max_days: 3650, max_backups: 100000, localtime: false }
   file/traces:
-    path: /archive/traces.jsonl
+    path: /archive/traces.jsonl.zst
     format: json
     compression: zstd
     rotation: { max_megabytes: 256, max_days: 3650, max_backups: 100000, localtime: false }

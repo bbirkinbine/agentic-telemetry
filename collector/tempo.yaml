@@ -1,4 +1,5 @@
-# Tempo single-binary, local storage, 90-day retention. Optional. Not yet run.
+# Tempo single-binary, local storage, 90-day retention. Optional.
+# Data lives under /var/tempo: in the image, /tempo is the tempo binary itself.
 server:
   http_listen_port: 3200
 
@@ -15,9 +16,9 @@ storage:
   trace:
     backend: local
     local:
-      path: /tempo/blocks
+      path: /var/tempo/blocks
     wal:
-      path: /tempo/wal
+      path: /var/tempo/wal
 
 compactor:
   compaction:
