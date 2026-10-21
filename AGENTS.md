@@ -102,8 +102,9 @@ Keep personal preferences in ignored local overlays (`CLAUDE.local.md`,
 ## Stack
 
 - Python 3.12 (managed by `uv`)
-- Analysis libraries not decided yet; DuckDB over JSONL/Parquet is the working
-  assumption, to be settled in spec 0001 (`/adr` if it turns out cross-cutting)
+- DuckDB (`duckdb>=1.5.6,<2`) writes and queries Parquet/JSONL in place; files
+  stay the record of truth, parsing stays in plain Python
+  (`docs/adr/0001-duckdb-over-files.md`)
 - Collector VM: OpenTelemetry Collector (contrib), VictoriaMetrics, Loki, Tempo,
   as Docker Compose under `collector/`; Grafana stays on the existing monitoring VM
 - pytest + pytest-asyncio
@@ -116,7 +117,8 @@ hooks, `/review-check`, and CI call its subcommands. Use them too, so a
 tool swap changes one file.
 
 - Install: `.agentic/toolchain.sh install` (`uv sync`)
-- Run app: no entry point yet; spec 0001 defines the first CLI command
+- Run table: `uv run agentic-telemetry run-table --out data/run_table.parquet DIR...`
+  (DIR = project roots or inbox copies; `data/` is ignored, never committed)
 - Run tests: `.agentic/toolchain.sh test` (`uv run pytest`)
 - Single test: `.agentic/toolchain.sh test path/to/test.py::test_name`
 - Lint / format / type-check: `.agentic/toolchain.sh lint | format | typecheck`
@@ -241,13 +243,20 @@ Rules for anything that comes from outside:
 ## Open work / current state (updated 2026-10-21)
 
 - Bootstrapped 2026-10-21 (full profile). `collector/` and `analysis/` are design
-  drafts; the telemetry VM is not deployed; no code yet.
+  drafts; the telemetry VM is not deployed.
+- Product spec `docs/specs/0000-product.md` exists. Spec 0001 (run table from
+  delegate ledgers, review rows, `result.json`, `state.json` and Pi transcripts)
+  is shipped: `src/agentic_telemetry/run_table/` plus the `run-table` CLI. Against
+  the owner's two private projects with delegate runs it writes 15 rows, 11
+  reviews, 4 runs with tokens and 1 orphaned result directory.
 - Depends on the scaffold's Phase 1 tool-call ledger (separate work in the
   agentic-scaffold repo, vault prompt `Agentic Scaffold Telemetry - Agent Prompt`)
-  only for the interactive-session ledger reader; delegate-runner evidence
-  already exists in local-pacman and local-spaceinvaders and is enough for 0001.
-- Next: `docs/specs/0000-product.md` via `/product-spec`, then spec 0001, the run
-  table from delegate ledgers and `result.json` files.
+  only for the interactive-session ledger reader (roadmap unit 2).
+- Next: roadmap unit 2 (tool-call ledger reader and transition failure matrix)
+  once Phase 1 lands, or unit 3 (collector VM bring-up and server-metrics join).
+  Unit 3 must revisit two 0001 defaults: a stale inbox copy of a run is a
+  conflict (exit 1), and an inbox ledger without `.agentic` takes its parent
+  directory name as `project`.
 
 <!-- agentic-scaffold:standing-rules:start -->
 
