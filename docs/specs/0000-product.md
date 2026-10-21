@@ -79,7 +79,8 @@ leaderboards; this only has to answer questions about my own setup.
    exist at the time. Spec: `docs/specs/0001-*.md` (next).
 2. Tool-call ledger reader and session summaries: parse the scaffold's Phase 1
    ledger and the three clients' session transcripts into per-session rows, then
-   the transition failure matrix per fingerprint. Depends on the scaffold's Phase 1
+   the transition failure matrix per fingerprint. The session-transcript half is
+   spec 0002 (shipped); the ledger reader and matrix depend on the scaffold's Phase 1
    landing.
 3. Collector VM bring-up and server-metrics join: deploy the validated stack under
    `collector/`, ship ledgers from the Mac, scrape the inference host, and join each run's time

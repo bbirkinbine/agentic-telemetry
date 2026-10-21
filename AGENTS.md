@@ -119,6 +119,9 @@ tool swap changes one file.
 - Install: `.agentic/toolchain.sh install` (`uv sync`)
 - Run table: `uv run agentic-telemetry run-table --out data/run_table.parquet DIR...`
   (DIR = project roots or inbox copies; `data/` is ignored, never committed)
+- Session table: `uv run agentic-telemetry session-table --out data/session_table.parquet [DIR...]`
+  (no DIR = each client's default session directory; DIR = session directories,
+  project roots or inbox copies)
 - Run tests: `.agentic/toolchain.sh test` (`uv run pytest`)
 - Single test: `.agentic/toolchain.sh test path/to/test.py::test_name`
 - Lint / format / type-check: `.agentic/toolchain.sh lint | format | typecheck`
@@ -249,11 +252,17 @@ Rules for anything that comes from outside:
   is shipped: `src/agentic_telemetry/run_table/` plus the `run-table` CLI. Against
   the owner's two private projects with delegate runs it writes 15 rows, 11
   reviews, 4 runs with tokens and 1 orphaned result directory.
+- Spec 0002 (session table from Pi, Claude Code and Codex transcripts, including
+  Codex `.jsonl.zst`) is shipped: `src/agentic_telemetry/session_table/` plus the
+  `session-table` CLI, which reads the clients' default session directories when
+  given no DIR. On the owner's machine it writes 629 sessions (187 Pi, 256 Claude
+  Code, 186 Codex) with no warnings; delegate sessions agree with the run table's
+  token totals.
 - Depends on the scaffold's Phase 1 tool-call ledger (separate work in the
   agentic-scaffold repo, vault prompt `Agentic Scaffold Telemetry - Agent Prompt`)
-  only for the interactive-session ledger reader (roadmap unit 2).
-- Next: roadmap unit 2 (tool-call ledger reader and transition failure matrix)
-  once Phase 1 lands, or unit 3 (collector VM bring-up and server-metrics join).
+  only for the tool-call ledger reader (the rest of roadmap unit 2).
+- Next: the rest of roadmap unit 2 (tool-call ledger reader and transition failure
+  matrix) once Phase 1 lands, or unit 3 (collector VM bring-up and server-metrics join).
   Unit 3 must revisit two 0001 defaults: a stale inbox copy of a run is a
   conflict (exit 1), and an inbox ledger without `.agentic` takes its parent
   directory name as `project`.

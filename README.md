@@ -25,6 +25,8 @@ cd agentic-telemetry
 mkdir -p data
 uv run agentic-telemetry run-table --out data/run_table.parquet ~/src/my-project
 # one row per delegate run; see AGENTS.md → How to run things
+uv run agentic-telemetry session-table --out data/session_table.parquet
+# one row per Pi, Claude Code or Codex session, from each client's default session directory
 ```
 
 ## Repository layout
@@ -34,7 +36,8 @@ uv run agentic-telemetry run-table --out data/run_table.parquet ~/src/my-project
   ledger ship script; `collector/clients/` holds client config snippets
 - `analysis/`: the analysis plan: telemetry review vs public benchmarks vs private
   evals, the agent/server join, and the pattern catalog
-- `src/agentic_telemetry/`: the Python package (readers, run table, matrices, review app)
+- `src/agentic_telemetry/`: the Python package (readers, run table, session table,
+  matrices, review app)
 - `tests/`: the suite
 - `docs/specs/`: specs; `docs/adr/`: architecture decisions
 

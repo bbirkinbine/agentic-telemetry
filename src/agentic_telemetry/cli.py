@@ -1,6 +1,8 @@
-"""Command line: `agentic-telemetry run-table --out PATH DIR...`."""
+"""Command line: `agentic-telemetry run-table --out PATH DIR...` and
+`agentic-telemetry session-table --out PATH [DIR...]`."""
 
 import argparse
+import os
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -10,6 +12,12 @@ from agentic_telemetry.run_table.dedupe import ConflictingRunError
 from agentic_telemetry.run_table.discovery import NoLedgerError
 from agentic_telemetry.run_table.parquet_writer import write_run_table
 from agentic_telemetry.run_table.summary import render_summary
+from agentic_telemetry.session_table.build import build_session_table
+from agentic_telemetry.session_table.discovery import NoTranscriptError
+from agentic_telemetry.session_table.parquet_writer import write_session_table
+from agentic_telemetry.session_table.sources import default_sources
+from agentic_telemetry.session_table.summary import render_source_line
+from agentic_telemetry.session_table.summary import render_summary as render_session_summary
 
 RUN_TABLE_DESCRIPTION = (
     "Build the run table: one row per delegate run, read from every delegate ledger "
@@ -19,9 +27,20 @@ RUN_TABLE_DESCRIPTION = (
     "is rebuilt from scratch on every run. Prints a summary of counts and warnings."
 )
 
+SESSION_TABLE_DESCRIPTION = (
+    "Build the session table: one row per Pi, Claude Code or Codex session, read from "
+    "the clients' own transcripts (*.jsonl, and Codex's compressed *.jsonl.zst) under "
+    "each DIR. With no DIR, reads each client's default session directory that exists: "
+    "Pi at $PI_CODING_AGENT_SESSION_DIR, else $PI_CODING_AGENT_DIR/sessions, else "
+    "~/.pi/agent/sessions; Claude Code at $CLAUDE_CONFIG_DIR/projects, else "
+    "~/.claude/projects; Codex at $CODEX_HOME/sessions, else ~/.codex/sessions. "
+    "Inputs are read-only; the only file written is --out, rebuilt from scratch on "
+    "every run. Prints counts and warnings, never transcript content."
+)
+
 
 def _input_dir(value: str) -> Path:
-    """Argparse type: an existing directory to search for ledgers."""
+    """Argparse type: an existing directory to search for ledgers or session transcripts."""
     path = Path(value)
     if not path.exists():
         raise argparse.ArgumentTypeError(f"input directory does not exist: {value}")
@@ -70,6 +89,25 @@ def _parser() -> argparse.ArgumentParser:
         metavar="DIR",
         help="project root or collector inbox directory to search for ledgers",
     )
+    session_table = commands.add_parser(
+        "session-table",
+        help="build the session table from Pi, Claude Code and Codex transcripts",
+        description=SESSION_TABLE_DESCRIPTION,
+    )
+    session_table.add_argument(
+        "--out",
+        required=True,
+        type=_parquet_out,
+        metavar="PATH",
+        help="Parquet file to write, e.g. data/session_table.parquet (parent must exist)",
+    )
+    session_table.add_argument(
+        "dirs",
+        nargs="*",
+        type=_input_dir,
+        metavar="DIR",
+        help="session directory, project root or inbox copy; omit to use the defaults",
+    )
     return parser
 
 
@@ -86,6 +124,46 @@ def _run_table(dirs: Sequence[Path], out: Path) -> int:
     return 0
 
 
+def _session_table(dirs: Sequence[Path], out: Path) -> int:
+    """Build and write the session table; return the process exit code."""
+    home = Path.home()
+    source_lines: list[str] = []
+    require_each = bool(dirs)
+    if not dirs:
+        sources = default_sources(os.environ, home)
+        source_lines = [render_source_line(source, home) for source in sources]
+        dirs = [source.path for source in sources if source.found]
+        if not dirs:
+            print("\n".join(source_lines))
+            print(
+                "agentic-telemetry session-table: error: no default session directory "
+                "exists for pi, claude-code or codex; pass DIR explicitly",
+                file=sys.stderr,
+            )
+            return 1
+    try:
+        rows, summary = build_session_table(dirs, require_each=require_each)
+    except NoTranscriptError as error:
+        for warning in dict.fromkeys(error.warnings):
+            print(f"warning: {warning}", file=sys.stderr)
+        print(f"agentic-telemetry session-table: error: {error}", file=sys.stderr)
+        return 1
+    if not rows:
+        # Never replace an earlier table with an empty one.
+        where = "the given directories" if require_each else "the default session directories"
+        print("\n".join([*source_lines, render_session_summary(summary)]))
+        print(
+            f"agentic-telemetry session-table: error: no session row could be built from "
+            f"{where}; nothing written",
+            file=sys.stderr,
+        )
+        return 1
+    write_session_table(rows, out)
+    print("\n".join([*source_lines, render_session_summary(summary)]))
+    print(f"wrote {len(rows)} rows to {out}")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the command line and return its exit code.
 
@@ -97,9 +175,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     """
     parser = _parser()
     args = parser.parse_args(argv)
-    if args.command != "run-table":
-        parser.print_help(sys.stderr)
-        return 2
-    dirs: list[Path] = args.dirs
-    out: Path = args.out
-    return _run_table(dirs, out)
+    dirs: list[Path] = getattr(args, "dirs", [])
+    out: Path | None = getattr(args, "out", None)
+    if args.command == "run-table" and out is not None:
+        return _run_table(dirs, out)
+    if args.command == "session-table" and out is not None:
+        return _session_table(dirs, out)
+    parser.print_help(sys.stderr)
+    return 2

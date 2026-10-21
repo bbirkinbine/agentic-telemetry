@@ -1,4 +1,4 @@
-"""Shared fixtures for run-table tests: thin wrappers over `run_table_builders`."""
+"""Shared fixtures: thin wrappers over `run_table_builders` and `session_tree_builder`."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ from run_table_builders import (
     write_session,
     write_state,
 )
+from session_tree_builder import SessionTree, make_session_tree
 
 
 @pytest.fixture
@@ -86,3 +87,8 @@ def evidence_tree(tmp_path: Path) -> EvidenceTree:
         reviews_joined=3,
         runs_with_tokens=1,
     )
+
+
+@pytest.fixture
+def session_tree(tmp_path: Path) -> SessionTree:
+    return make_session_tree(tmp_path / "sessions")
