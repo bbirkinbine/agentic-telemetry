@@ -31,6 +31,7 @@ line; the source of truth is the spec file, this is a rendered cache. Run
 <!-- Generated block — do not edit by hand; the specs-status hook overwrites it. Source of truth is each spec's **Status:** field. -->
 - [0000 — agentic-telemetry](0000-product.md)  (evergreen)
 - ~~[0001 — Run Table](0001-run-table.md)~~  (shipped)
+- ~~[0002 — Session Table](0002-session-table.md)~~  (shipped)
 <!-- specs-status:end -->
 
 ## Numbering

@@ -1,8 +1,9 @@
 """Write run-table rows to Parquet through DuckDB (ADR 0001).
 
-This is the only module that imports duckdb. The table is created from an
-explicit schema so every column keeps its type even when all its values are
-null, or when there are no rows at all.
+The table is created from an explicit schema so every column keeps its type
+even when all its values are null, or when there are no rows at all. The
+session table's writer (`session_table/parquet_writer.py`) repeats this pattern
+with its own schema.
 """
 
 import dataclasses
