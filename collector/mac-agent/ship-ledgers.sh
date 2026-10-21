@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Batch path: copy file-based evidence from this Mac to the VM inbox. Idempotent;
+# Batch path: copy file-based evidence from this Mac to the VM landing. Idempotent;
 # safe to run every 15 minutes from launchd. Exits quietly when the VM is unreachable.
-# Layout on the VM: inbox/<host>/<project>/<file>.jsonl
+# Layout on the VM: landing/<host>/<project>/<file>.jsonl
 set -euo pipefail
 VM="${TELEMETRY_VM:-telemetry.example}"
-DEST="${TELEMETRY_INBOX:-/srv/telemetry/inbox}/$(hostname -s)"
+DEST="${TELEMETRY_LANDING:-/srv/telemetry/landing}/$(hostname -s)"
 SRC_ROOT="${PROJECTS_ROOT:-$HOME/src}"   # override with PROJECTS_ROOT
 
 # Reachable? (Tailscale or LAN). If not, do nothing; next run will catch up.

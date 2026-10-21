@@ -11,7 +11,7 @@ Grafana can query. The sources change (Claude Code today, Codex, Pi, local model
 servers, your own apps); the VM does not.
 
 The rule that makes it source-agnostic: **everything enters as OpenTelemetry (OTLP)
-or as a JSONL file dropped in an inbox. Nothing else.** The Collector is the only
+or as a JSONL file dropped in a landing zone. Nothing else.** The Collector is the only
 process that knows where data goes.
 
 ```
@@ -21,7 +21,7 @@ process that knows where data goes.
  your Python apps (OTel SDK) ───────┤                │   └──────────────────┘
                                     │                │   ┌──────────────────┐
  ledger.jsonl / session JSONL       ▼                ├──>│ Loki :3100       │ logs, 2y
- (rsync from Macs) ──> inbox/ ──> OTel Collector ────┤   └──────────────────┘
+ (rsync from Macs) ──> landing/ ──> OTel Collector ────┤   └──────────────────┘
                        (filelog)   (one process)     │   ┌──────────────────┐
  llama.cpp / llama-swap /metrics ──> (prometheus     ├──>│ Tempo :3200      │ traces, 90d (optional)
                                      receiver)       │   └──────────────────┘
@@ -40,7 +40,7 @@ process that knows where data goes.
 | OS | Ubuntu 24.04, Docker + compose | same as the rest of the lab |
 | Size | 4 vCPU, 8 GB RAM, 250 GB thin disk | single-developer volume is tiny; disk is the only thing that grows |
 | Network | LAN + Tailscale, no public exposure | same policy as the inference gateway in `ENDPOINTS.md` |
-| Storage | `/srv/telemetry/{archive,inbox,victoria,loki,tempo}` | archive can be an NFS mount from the NAS |
+| Storage | `/srv/telemetry/{archive,landing,victoria,loki,tempo}` | archive can be an NFS mount from the NAS |
 | Backup | PBS backs up the VM; archive is also rsynced to the NAS | the archive is the irreplaceable part |
 
 ## Services (compose.yaml)
@@ -77,14 +77,14 @@ archive into the new store.
 |---|---|---|---|
 | Claude Code | OTLP/HTTP to `:4318` | metrics (`claude_code.cost.usage`, `token.usage`, `lines_of_code.count`, `commit.count`, `session.count`, `active_time.total`), log events (`claude_code.tool_result`, `tool_decision`, `api_request`, ...), traces (beta) | `clients/claude-code-user-settings.json` merged into `~/.claude/settings.json`. Must be user-level; a repo's `.claude/settings.json` cannot turn export on |
 | Codex CLI | OTLP/HTTP to `:4318` | log events (`codex.tool_decision`, `codex.tool_result`, ...) | `[otel]` table in `~/.codex/config.toml` with an `otlp-http` exporter. Exact sub-table syntax still unverified; see the vault plan |
-| Pi (interactive) | none live | ledger + session JSONL | arrives via the inbox |
-| Delegate runner | none live | `ledger.jsonl`, `results/<run>/result.json`, session JSONL | arrives via the inbox |
-| Scaffold tool-call ledger (Phase 1, all clients) | inbox | one JSON line per tool call | `scripts/ship-ledgers.sh` (to write) rsyncs `.agentic/telemetry/*.jsonl` and `.agentic/delegate/` from each project to `inbox/<host>/<project>/` |
-| llama-swap / llama.cpp server | Collector scrapes `/metrics` | llama-swap: system and GPU metrics. llama.cpp (`--metrics`): prompt/predicted token counters, tokens/s, `requests_deferred`, `n_tokens_max` | start each upstream with `--metrics`; add targets under the `prometheus` receiver (router mode needs `?model=<id>`). Per-request lines come from llama-swap `/logs/stream/http`, captured into the inbox |
+| Pi (interactive) | none live | ledger + session JSONL | arrives via the landing zone |
+| Delegate runner | none live | `ledger.jsonl`, `results/<run>/result.json`, session JSONL | arrives via the landing zone |
+| Scaffold tool-call ledger (Phase 1, all clients) | landing zone | one JSON line per tool call | `scripts/ship-ledgers.sh` (to write) rsyncs `.agentic/telemetry/*.jsonl` and `.agentic/delegate/` from each project to `landing/<host>/<project>/` |
+| llama-swap / llama.cpp server | Collector scrapes `/metrics` | llama-swap: system and GPU metrics. llama.cpp (`--metrics`): prompt/predicted token counters, tokens/s, `requests_deferred`, `n_tokens_max` | start each upstream with `--metrics`; add targets under the `prometheus` receiver (router mode needs `?model=<id>`). Per-request lines come from llama-swap `/logs/stream/http`, captured into the landing zone |
 | Your own Python agents | OTLP from the OTel SDK | GenAI spans + metrics | `OTEL_EXPORTER_OTLP_ENDPOINT=http://telemetry:4318` |
-| Anything else | drop JSONL in `inbox/<source>/` | logs | the `filelog` receiver tails it; each line becomes one log record with `source` from the path |
+| Anything else | drop JSONL in `landing/<source>/` | logs | the `filelog` receiver tails it; each line becomes one log record with `source` from the path |
 
-The inbox is the escape hatch that makes this "irregardless of source": a cron job on
+The landing zone is the escape hatch that makes this "irregardless of source": a cron job on
 any machine can rsync files there, and the Collector turns them into log records
 with a checkpoint so nothing is ingested twice.
 
@@ -95,7 +95,7 @@ Two paths. Both end in the same archive and the same stores.
 | | Live path (OTLP) | Batch path (files) |
 |---|---|---|
 | Carries | Claude Code metrics and events, Codex events, your apps' spans | tool-call ledgers, delegate results, session transcripts |
-| Mac side | `mac-agent/otel-agent.yaml`: a Collector on `localhost:4318` with a disk-backed queue and a local JSONL copy | `mac-agent/ship-ledgers.sh` every 15 min from launchd: rsync over SSH (LAN or Tailscale) into `inbox/<host>/` |
+| Mac side | `mac-agent/otel-agent.yaml`: a Collector on `localhost:4318` with a disk-backed queue and a local JSONL copy | `mac-agent/ship-ledgers.sh` every 15 min from launchd: rsync over SSH (LAN or Tailscale) into `landing/<host>/` |
 | Offline | the queue fills on disk and drains when the VM is reachable; the local copy is written regardless | the script exits quietly; the next run catches up. Files never change after a session ends, so nothing is lost |
 | Authoritative? | best effort: the queue has a cap and the clients drop on their own if no agent is listening | yes: the ledger and transcript files are the record of truth |
 
@@ -108,11 +108,11 @@ Timeline for one session:
 1. During the session: Claude Code pushes OTLP to the Mac agent; the scaffold hook
    appends to `.agentic/telemetry/<session>.jsonl`. Both are local writes.
 2. Within minutes, when the VM is reachable: the agent drains its queue; the ship
-   script rsyncs new ledger lines and transcripts into the inbox.
-3. On the VM, continuously: the Collector tails the inbox and writes every record to
+   script rsyncs new ledger lines and transcripts into the landing zone.
+3. On the VM, continuously: the Collector tails the landing zone and writes every record to
    the archive, VictoriaMetrics and Loki; the filelog checkpoint prevents re-ingest.
 4. Nightly: the analysis package rebuilds the run table and matrices from the archive
-   and inbox into Parquet.
+   and landing zone into Parquet.
 
 ## Retention policy, in one place
 
@@ -122,10 +122,10 @@ Timeline for one session:
 | VictoriaMetrics | 5 years | `-retentionPeriod` flag |
 | Loki | 2 years | `limits_config.retention_period` + compactor |
 | Tempo | 90 days | `compactor.compaction.block_retention` |
-| Inbox files | until processed + 30 days | the ship script deletes after the Collector checkpoint passes |
+| Landing-zone files | until processed + 30 days | the ship script deletes after the Collector checkpoint passes |
 
 Derived stats (per-session and per-run summary rows, the per-model failure matrix)
-are computed by the Python package in this repo from the archive and the inbox, and
+are computed by the Python package in this repo from the archive and the landing zone, and
 written to a DuckDB/Parquet set that is itself backed up. Those rows are what you
 look at in a year; the raw records are what you go back to when a number looks wrong.
 
@@ -152,6 +152,9 @@ Validated today with the pinned images, on the Mac, via Docker:
 - `loki-config.yaml`: `loki -verify-config` reports "config is valid" on 3.7.9.
 - `tempo.yaml`: parses on 2.10.10; the start failed only on the missing `/tempo`
   volume, which compose mounts.
+- Re-validated 2026-10-21 after the `inbox` → `landing` rename: `otel-collector.yaml`
+  passes `otelcol-contrib validate` on 0.163.1; `loki-config.yaml` reports "config
+  is valid" on 3.7.9.
 
 Not yet done: a live end-to-end run (synthetic span in, row out in each store); Codex
 `[otel]` exporter syntax; which of the llama.cpp endpoints Strata and Project Maya

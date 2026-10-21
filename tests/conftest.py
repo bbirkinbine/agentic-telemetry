@@ -48,7 +48,7 @@ def evidence_tree(tmp_path: Path) -> EvidenceTree:
     )
     write_session(orphan_dir, [session_header(), assistant_message(tokens_in=7, tokens_out=3)])
 
-    beta = make_project(root, "beta", layout="inbox")
+    beta = make_project(root, "beta", layout="landing")
     beta_ledger = write_ledger(
         beta,
         [

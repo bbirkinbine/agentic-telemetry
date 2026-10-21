@@ -118,10 +118,10 @@ tool swap changes one file.
 
 - Install: `.agentic/toolchain.sh install` (`uv sync`)
 - Run table: `uv run agentic-telemetry run-table --out data/run_table.parquet DIR...`
-  (DIR = project roots or inbox copies; `data/` is ignored, never committed)
+  (DIR = project roots or landing-zone copies; `data/` is ignored, never committed)
 - Session table: `uv run agentic-telemetry session-table --out data/session_table.parquet [DIR...]`
   (no DIR = each client's default session directory; DIR = session directories,
-  project roots or inbox copies)
+  project roots or landing-zone copies)
 - Run tests: `.agentic/toolchain.sh test` (`uv run pytest`)
 - Single test: `.agentic/toolchain.sh test path/to/test.py::test_name`
 - Lint / format / type-check: `.agentic/toolchain.sh lint | format | typecheck`
@@ -218,7 +218,7 @@ correctness. The rules, complete gate, and fresh semantic review still apply.
 - `collector/*.yaml` and `collector/mac-agent/otel-agent.yaml` are validated
   against pinned images (see `collector/README.md` → Verification); re-validate
   after any edit and record it there
-- `collector/inbox/` contents and anything under `data/` are evidence, never
+- `collector/landing/` contents and anything under `data/` are evidence, never
   edited by hand and never committed
 
 ## Third-party code and licenses
@@ -263,8 +263,8 @@ Rules for anything that comes from outside:
   only for the tool-call ledger reader (the rest of roadmap unit 2).
 - Next: the rest of roadmap unit 2 (tool-call ledger reader and transition failure
   matrix) once Phase 1 lands, or unit 3 (collector VM bring-up and server-metrics join).
-  Unit 3 must revisit two 0001 defaults: a stale inbox copy of a run is a
-  conflict (exit 1), and an inbox ledger without `.agentic` takes its parent
+  Unit 3 must revisit two 0001 defaults: a stale landing-zone copy of a run is a
+  conflict (exit 1), and a landing-zone ledger without `.agentic` takes its parent
   directory name as `project`.
 
 <!-- agentic-scaffold:standing-rules:start -->

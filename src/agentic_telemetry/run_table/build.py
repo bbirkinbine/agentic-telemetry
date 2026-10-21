@@ -16,7 +16,7 @@ def build_run_table(dirs: Sequence[Path]) -> tuple[list[RunRow], Summary]:
     Reads evidence only; writes nothing.
 
     Args:
-        dirs: Project roots or collector inbox directories.
+        dirs: Project roots or collector landing directories.
 
     Returns:
         One row per distinct run ID, and the build summary.
@@ -33,7 +33,7 @@ def build_run_table(dirs: Sequence[Path]) -> tuple[list[RunRow], Summary]:
         assembled = assemble_ledger(ledger)
         all_rows.extend(assembled.rows)
         for orphan in assembled.orphans:
-            # A project root and its inbox copy hold the same orphan; list it once.
+            # A project root and its landing copy hold the same orphan; list it once.
             if orphan not in orphan_ids:
                 orphan_ids.add(orphan)
                 summary.orphans.append(f"{ledger.project}/{orphan}")

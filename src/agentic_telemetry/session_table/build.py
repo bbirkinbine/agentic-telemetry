@@ -22,7 +22,7 @@ def build_session_table(
 
     Args:
         dirs: Directories to search: client session directories, project roots
-            or collector inbox copies.
+            or collector landing copies.
         require_each: Raise when a directory holds no transcript (see
             `find_transcripts`).
 

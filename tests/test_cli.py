@@ -10,7 +10,7 @@ from pathlib import Path
 import duckdb
 import pytest
 from run_table_builders import (
-    INBOX_HOST,
+    LANDING_HOST,
     EvidenceTree,
     make_project,
     run_record,
@@ -164,9 +164,9 @@ def test_conflicting_duplicate_run_exits_1_naming_both_ledgers_and_writes_nothin
     work = tmp_path / "work"
     work_ledger = write_ledger(make_project(work, "local-game"), [run_record("run-shared")])
     collector = tmp_path / "collector"
-    copy = collector / "inbox" / INBOX_HOST / "local-game"
+    copy = collector / "landing" / LANDING_HOST / "local-game"
     shutil.copytree(work_ledger.parent, copy)
-    inbox_ledger = write_ledger(copy, [run_record("run-shared", outcome="needs_frontier")])
+    landing_ledger = write_ledger(copy, [run_record("run-shared", outcome="needs_frontier")])
     out_dir = tmp_path / "data"
     out_dir.mkdir()
     out = out_dir / "run_table.parquet"
@@ -176,7 +176,7 @@ def test_conflicting_duplicate_run_exits_1_naming_both_ledgers_and_writes_nothin
     err = capsys.readouterr().err
     assert code == 1
     assert str(work_ledger) in err
-    assert str(inbox_ledger) in err
+    assert str(landing_ledger) in err
     assert list(out_dir.iterdir()) == []
 
 

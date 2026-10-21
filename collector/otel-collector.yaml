@@ -5,7 +5,7 @@
 extensions:
   health_check:
     endpoint: 0.0.0.0:13133
-  file_storage:            # checkpoints for filelog so inbox files are never re-ingested
+  file_storage:            # checkpoints for filelog so landing files are never re-ingested
     directory: /state
     create_directory: true
   # Optional: require a bearer token from clients (Claude Code sends
@@ -24,8 +24,8 @@ receivers:
 
   # Anything that cannot speak OTLP drops JSONL here (rsync from the Macs).
   # One file per session or run; one JSON object per line.
-  filelog/inbox:
-    include: [/inbox/**/*.jsonl]
+  filelog/landing:
+    include: [/landing/**/*.jsonl]
     start_at: beginning
     storage: file_storage
     include_file_path: true
@@ -37,9 +37,9 @@ receivers:
           layout: '%Y-%m-%dT%H:%M:%S.%LZ'
           layout_type: strptime
         on_error: send_quiet        # a malformed line is kept as raw text, not dropped
-      - type: regex_parser           # /inbox/<host>/<project>/<file>  ->  attributes
+      - type: regex_parser           # /landing/<host>/<project>/<file>  ->  attributes
         parse_from: attributes["log.file.path"]
-        regex: '^/inbox/(?P<inbox_host>[^/]+)/(?P<inbox_project>[^/]+)/'
+        regex: '^/landing/(?P<landing_host>[^/]+)/(?P<landing_project>[^/]+)/'
         on_error: send_quiet
 
   # Scrape local model servers that expose Prometheus metrics.
@@ -126,7 +126,7 @@ service:
       processors: [memory_limiter, resource, batch]
       exporters: [otlphttp/victoriametrics, file/metrics]
     logs:
-      receivers: [otlp, filelog/inbox]
+      receivers: [otlp, filelog/landing]
       processors: [memory_limiter, resource, redaction, transform/size, batch]
       exporters: [otlphttp/loki, file/logs]
     traces:

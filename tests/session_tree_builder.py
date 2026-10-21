@@ -43,7 +43,7 @@ from session_table_builders import (
     write_jsonl_zst,
 )
 
-INBOX_HOST = "laptop.example"
+LANDING_HOST = "laptop.example"
 PI_SLUG = "--workspace-alpha-project--"
 CC_SLUG = "-workspace-beta-project"
 
@@ -85,7 +85,7 @@ def make_session_tree(root: Path) -> SessionTree:
     ]
     live_pi = write_jsonl(pi_dir / pi_session_file_name("pi-main-0001"), pi_main + live_tail)
     stale_pi = write_jsonl(
-        root / "inbox" / INBOX_HOST / "pi-sessions" / PI_SLUG / live_pi.name, pi_main
+        root / "landing" / LANDING_HOST / "pi-sessions" / PI_SLUG / live_pi.name, pi_main
     )
     write_jsonl(
         pi_dir / pi_session_file_name("pi-child-0001"),

@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from run_table_builders import INBOX_HOST, make_project, run_record, write_ledger
+from run_table_builders import LANDING_HOST, make_project, run_record, write_ledger
 
 from agentic_telemetry.run_table.discovery import NoLedgerError, find_ledgers, project_name
 
@@ -24,7 +24,7 @@ def test_finds_ledger_whose_parent_is_named_delegate(tmp_path: Path) -> None:
 
 
 def test_finds_ledger_whose_parent_contains_a_results_directory(tmp_path: Path) -> None:
-    flattened = make_project(tmp_path, "proj", layout="inbox")
+    flattened = make_project(tmp_path, "proj", layout="landing")
     ledger = write_ledger(flattened, [run_record()])
 
     found = find_ledgers([tmp_path])
@@ -51,28 +51,28 @@ def test_project_is_the_directory_that_contains_dot_agentic(tmp_path: Path) -> N
     assert [item.project for item in found] == ["local-game"]
 
 
-def test_project_is_the_ledger_parent_when_inbox_flattens_the_path(tmp_path: Path) -> None:
-    write_ledger(make_project(tmp_path, "local-game", layout="inbox"), [run_record()])
+def test_project_is_the_ledger_parent_when_landing_flattens_the_path(tmp_path: Path) -> None:
+    write_ledger(make_project(tmp_path, "local-game", layout="landing"), [run_record()])
 
     found = find_ledgers([tmp_path])
 
     assert [item.project for item in found] == ["local-game"]
 
 
-def test_project_uses_dot_agentic_parent_inside_an_inbox_copy(tmp_path: Path) -> None:
-    copy_root = tmp_path / "inbox" / INBOX_HOST / "local-game"
+def test_project_uses_dot_agentic_parent_inside_an_landing_copy(tmp_path: Path) -> None:
+    copy_root = tmp_path / "landing" / LANDING_HOST / "local-game"
     ledger = copy_root / ".agentic" / "delegate" / "ledger.jsonl"
     assert project_name(ledger) == "local-game"
 
 
 def test_project_name_falls_back_to_ledger_parent_directory_name(tmp_path: Path) -> None:
-    ledger = tmp_path / "inbox" / INBOX_HOST / "local-game" / "ledger.jsonl"
+    ledger = tmp_path / "landing" / LANDING_HOST / "local-game" / "ledger.jsonl"
     assert project_name(ledger) == "local-game"
 
 
 def test_finds_ledgers_in_every_given_directory(tmp_path: Path) -> None:
     first = write_ledger(make_project(tmp_path / "a", "one"), [run_record()])
-    second = write_ledger(make_project(tmp_path / "b", "two", layout="inbox"), [run_record()])
+    second = write_ledger(make_project(tmp_path / "b", "two", layout="landing"), [run_record()])
 
     found = find_ledgers([tmp_path / "a", tmp_path / "b"])
 
@@ -131,10 +131,10 @@ def test_relative_dot_directory_names_the_project_and_an_absolute_ledger(
     assert found.path.is_absolute()
 
 
-def test_relative_dot_directory_names_an_inbox_project(
+def test_relative_dot_directory_names_an_landing_project(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    flattened = make_project(tmp_path, "local-game", layout="inbox")
+    flattened = make_project(tmp_path, "local-game", layout="landing")
     write_ledger(flattened, [run_record()])
     monkeypatch.chdir(flattened)
 

@@ -3,6 +3,9 @@
 **Status:** accepted
 **Last updated:** 2026-10-21
 
+> The collector `inbox/` was renamed `landing/` (landing zone) on 2026-10-21.
+> This record keeps the name it was written with.
+
 ## Context
 
 The product spec makes files the record of truth: ledgers, delegate result

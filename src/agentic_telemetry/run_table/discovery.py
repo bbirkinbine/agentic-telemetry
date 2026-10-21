@@ -2,7 +2,7 @@
 
 A ledger counts when it is named `ledger.jsonl` and either sits in a directory
 named `delegate` (a bootstrapped project's `.agentic/delegate/`) or next to a
-`results/` directory (a collector inbox copy that flattens that path).
+`results/` directory (a collector landing copy that flattens that path).
 """
 
 import os

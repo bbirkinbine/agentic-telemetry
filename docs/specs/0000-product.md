@@ -73,7 +73,7 @@ leaderboards; this only has to answer questions about my own setup.
 ## Roadmap pointers
 
 1. Run table from delegate evidence: given a list of scaffold-bootstrapped project
-   roots (or the VM inbox layout), read every `ledger.jsonl` and `result.json` into
+   roots (or the VM landing-zone layout), read every `ledger.jsonl` and `result.json` into
    one Parquet table keyed by run ID and served-configuration fingerprint, with
    outcome, first-failure phase, timings and tokens. Proven on whatever projects
    exist at the time. Spec: `docs/specs/0001-*.md` (next).
@@ -92,5 +92,5 @@ leaderboards; this only has to answer questions about my own setup.
 
 - Which llama.cpp endpoints (`/metrics`, `/slots`) the Strata and Project Maya
   builds expose; settles unit 3's scrape targets.
-- Whether the Collector's inbox tailing or a nightly batch load is the better path
+- Whether the Collector's landing-zone tailing or a nightly batch load is the better path
   for session transcripts, which can be large; settles in unit 3.

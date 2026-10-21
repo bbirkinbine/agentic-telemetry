@@ -1,6 +1,6 @@
 """Decide which client wrote a transcript by reading the head of the file.
 
-Classification is by content, not path, so inbox copies and renamed folders
+Classification is by content, not path, so landing copies and renamed folders
 classify the same way as the clients' own session directories.
 """
 

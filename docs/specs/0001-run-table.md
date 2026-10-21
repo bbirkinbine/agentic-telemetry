@@ -3,6 +3,9 @@
 **Status:** shipped
 **Last updated:** 2026-10-21
 
+> The collector `inbox/` was renamed `landing/` (landing zone) on 2026-10-21.
+> This record keeps the name it was written with.
+
 ## Goal
 
 Build the first output in `analysis/README.md`: a run table with one row per

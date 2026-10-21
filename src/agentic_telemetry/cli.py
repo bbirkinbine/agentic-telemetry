@@ -21,7 +21,7 @@ from agentic_telemetry.session_table.summary import render_summary as render_ses
 
 RUN_TABLE_DESCRIPTION = (
     "Build the run table: one row per delegate run, read from every delegate ledger "
-    "(.agentic/delegate/ledger.jsonl, or an inbox copy with a results/ directory) under "
+    "(.agentic/delegate/ledger.jsonl, or a landing-zone copy with a results/ directory) under "
     "each DIR, joined to its review verdict, result.json, state.json and session "
     "transcripts. Inputs are read-only evidence; the only file written is --out, which "
     "is rebuilt from scratch on every run. Prints a summary of counts and warnings."
@@ -87,7 +87,7 @@ def _parser() -> argparse.ArgumentParser:
         nargs="+",
         type=_input_dir,
         metavar="DIR",
-        help="project root or collector inbox directory to search for ledgers",
+        help="project root or collector landing-zone directory to search for ledgers",
     )
     session_table = commands.add_parser(
         "session-table",
@@ -106,7 +106,7 @@ def _parser() -> argparse.ArgumentParser:
         nargs="*",
         type=_input_dir,
         metavar="DIR",
-        help="session directory, project root or inbox copy; omit to use the defaults",
+        help="session directory, project root or landing-zone copy; omit to use the defaults",
     )
     return parser
 

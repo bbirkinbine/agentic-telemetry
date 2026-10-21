@@ -16,7 +16,7 @@ from typing import Literal
 JsonObject = dict[str, object]
 
 PLACEHOLDER_ENDPOINT = "gpu.example"
-INBOX_HOST = "laptop.example"
+LANDING_HOST = "laptop.example"
 
 
 def run_record(
@@ -211,18 +211,18 @@ def write_state(
 def make_project(
     root: Path,
     name: str,
-    layout: Literal["agentic", "inbox"] = "agentic",
+    layout: Literal["agentic", "landing"] = "agentic",
 ) -> Path:
     """Create a project skeleton and return the directory that will hold `ledger.jsonl`.
 
     `agentic`: `<root>/<name>/.agentic/delegate/` (a bootstrapped project root).
-    `inbox`: `<root>/inbox/laptop.example/<name>/` with a `results/` directory,
-    the collector inbox copy that flattens `.agentic/delegate/`.
+    `landing`: `<root>/landing/laptop.example/<name>/` with a `results/` directory,
+    the collector landing copy that flattens `.agentic/delegate/`.
     """
     if layout == "agentic":
         delegate_dir = root / name / ".agentic" / "delegate"
     else:
-        delegate_dir = root / "inbox" / INBOX_HOST / name
+        delegate_dir = root / "landing" / LANDING_HOST / name
     (delegate_dir / "results").mkdir(parents=True, exist_ok=True)
     return delegate_dir
 
@@ -234,7 +234,7 @@ class EvidenceTree:
     alpha (bootstrapped layout): 4 rows (3 ledger rows + 1 filled in from
     result.json), 2 joined reviews, 1 orphaned result directory, 1 malformed
     ledger line, 1 review for a run that does not exist.
-    beta (inbox layout): 1 handoff row with a transcript, state.json and a review.
+    beta (landing layout): 1 handoff row with a transcript, state.json and a review.
     """
 
     root: Path

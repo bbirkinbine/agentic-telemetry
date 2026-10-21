@@ -35,7 +35,7 @@ def _read(
 
 def test_the_file_with_more_lines_wins_whatever_the_input_order() -> None:
     live = _read("work/live/session.jsonl", 12)
-    stale = _read("inbox/copy/session.jsonl", 7)
+    stale = _read("landing/copy/session.jsonl", 7)
 
     for reads in ([live, stale], [stale, live]):
         rows, resolved, _ = merge_sessions(reads)
@@ -57,13 +57,13 @@ def test_equal_line_counts_keep_the_path_that_sorts_first() -> None:
 
 def test_the_duplicate_warning_names_both_paths() -> None:
     rows, _, warnings = merge_sessions(
-        [_read("work/live/session.jsonl", 12), _read("inbox/copy/session.jsonl", 7)]
+        [_read("work/live/session.jsonl", 12), _read("landing/copy/session.jsonl", 7)]
     )
 
     assert len(rows) == 1
     assert len(warnings) == 1
     assert "work/live/session.jsonl" in warnings[0]
-    assert "inbox/copy/session.jsonl" in warnings[0]
+    assert "landing/copy/session.jsonl" in warnings[0]
 
 
 def test_the_same_session_id_under_two_clients_is_not_a_duplicate() -> None:
@@ -94,15 +94,15 @@ def test_rows_come_back_sorted_by_client_then_session_id() -> None:
     ]
 
 
-def test_a_stale_inbox_copy_is_resolved_end_to_end_without_raising(tmp_path: Path) -> None:
+def test_a_stale_landing_copy_is_resolved_end_to_end_without_raising(tmp_path: Path) -> None:
     name = pi_session_file_name("pi-shared-0001")
     prefix = [pi_header("pi-shared-0001"), pi_user(), pi_assistant(timestamp=ts(1))]
     live = write_jsonl(
         tmp_path / "work" / name, [*prefix, pi_assistant(timestamp=ts(2)), pi_user()]
     )
-    write_jsonl(tmp_path / "inbox" / "laptop.example" / name, prefix)
+    write_jsonl(tmp_path / "landing" / "laptop.example" / name, prefix)
 
-    rows, _ = build_session_table([tmp_path / "work", tmp_path / "inbox"])
+    rows, _ = build_session_table([tmp_path / "work", tmp_path / "landing"])
 
     assert [(row.client, row.session_id) for row in rows] == [("pi", "pi-shared-0001")]
     assert rows[0].source_path == str(live)

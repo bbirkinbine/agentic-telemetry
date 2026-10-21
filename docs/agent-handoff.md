@@ -34,9 +34,9 @@ extra care. Each entry: *what to watch*, *why it bites*, *how to avoid*.
 
 - Secrets in captured content — ledgers and transcripts carry whatever a tool
   printed — never enable content capture on day-job repos; redact at the hook
-  and again at the Collector; never commit `collector/inbox/` or `data/`
+  and again at the Collector; never commit `collector/landing/` or `data/`
 - Eval contamination — earlier runs' ledgers and transcripts are an answer key
-  for a later agent — keep the inbox and archive out of any eval sandbox
+  for a later agent — keep the landing zone and archive out of any eval sandbox
 - Config drift — the collector YAMLs were validated against pinned images — after
   editing, re-run the validation commands in `collector/README.md`
 
@@ -69,7 +69,7 @@ where installed; an unplanned dependency is scope expansion),
 `.agentic/hooks/block-destructive.sh`. And the project-specific
 high-blast-radius commands: `docker compose up|down` against the telemetry VM,
 any `rsync` or `ssh` to the VM or to the inference host, and any delete under
-`collector/inbox/` or the VM's archive.
+`collector/landing/` or the VM's archive.
 
 ---
 
@@ -115,7 +115,7 @@ git restore <manifest> <lockfile>   # pyproject.toml + uv.lock, or package.json 
 
 **Out-of-repo side effects:** the Mac agent writes under
 `~/.local/state/otel-agent/` (queue and local archive); the ship script writes
-to the VM's `inbox/`; the VM's Collector writes `archive/` and the three stores
+to the VM's `landing/`; the VM's Collector writes `archive/` and the three stores
 under `/srv/telemetry/`. Clean the Mac state by stopping the agent and deleting
 the directory; never delete the VM archive without a verified backup.
 

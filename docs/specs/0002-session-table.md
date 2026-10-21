@@ -3,6 +3,9 @@
 **Status:** shipped
 **Last updated:** 2026-10-21
 
+> The collector `inbox/` was renamed `landing/` (landing zone) on 2026-10-21.
+> This record keeps the name it was written with.
+
 ## Goal
 
 Build the session half of roadmap pointer 2 in `0000-product.md`: a session
