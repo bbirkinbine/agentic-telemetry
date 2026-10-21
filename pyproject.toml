@@ -26,6 +26,7 @@ dev = [
   "ruff>=0.15",
   "mypy>=2.0",
   "pre-commit",
+  "pyyaml>=6.0.3,<7",  # collector config tests parse compose and Collector YAML
   # Optional verification depth — cheap when an agent does the labor.
   # Uncomment per project once there is real logic worth the rigor:
   # "pytest-cov",       # line-coverage report: uv run pytest --cov (CI does not gate on it)

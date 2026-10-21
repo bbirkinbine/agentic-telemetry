@@ -1,23 +1,36 @@
-# Telemetry VM services. Nothing here is exposed beyond LAN/Tailnet.
-# Grafana runs on the existing monitoring VM and queries these three stores.
+# Telemetry stack: the same file runs on the Mac (spec 0003) and on the telemetry
+# VM (spec 0006). Host-specific values come only from the untracked collector/.env
+# (start from env.example); compose stops with the named variable if one is unset.
+# Ports bind to TELEMETRY_BIND_ADDR: 127.0.0.1 on the Mac, the VM's LAN or Tailnet
+# address there. Grafana runs on the existing monitoring VM and queries the stores.
+#
+# Images are pinned by multi-arch index digest, so the Mac (linux/arm64) and an x86
+# Ubuntu host (linux/amd64) run the same release. Digests checked 2026-10-21 with
+# `docker buildx imagetools inspect`; see collector/README.md -> Images.
 services:
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.163.1
-    command: ["--config=/etc/otelcol/config.yaml"]
+    image: otel/opentelemetry-collector-contrib:0.163.1@sha256:1175b03003053962012f5a231f5567f66a3e8fdb960c7835c0e48f7aa1555806
+    command:
+      - "--config=/etc/otelcol/config.yaml"
+      # Archive files become standard zstd streams of OTLP JSON lines, readable with
+      # `zstd -dc`. Alpha gate in 0.163.1; re-check it on every Collector upgrade.
+      - "--feature-gates=exporter.file.nativeCompression"
     restart: unless-stopped
+    environment:
+      LLAMA_SWAP_TARGET: ${LLAMA_SWAP_TARGET:?set LLAMA_SWAP_TARGET in collector/.env}
     volumes:
       - ./otel-collector.yaml:/etc/otelcol/config.yaml:ro
-      - ${TELEMETRY_ROOT}/archive:/archive
-      - ${TELEMETRY_ROOT}/landing:/landing:ro
-      - ${TELEMETRY_ROOT}/collector-state:/state
+      - ${TELEMETRY_ROOT:?set TELEMETRY_ROOT in collector/.env}/archive:/archive
+      - ${TELEMETRY_ROOT:?set TELEMETRY_ROOT in collector/.env}/landing:/landing:ro
+      - ${TELEMETRY_ROOT:?set TELEMETRY_ROOT in collector/.env}/collector-state:/state
     ports:
-      - "4317:4317"   # OTLP gRPC
-      - "4318:4318"   # OTLP HTTP
-      - "13133:13133" # health
+      - "${TELEMETRY_BIND_ADDR:?set TELEMETRY_BIND_ADDR in collector/.env}:4317:4317"   # OTLP gRPC
+      - "${TELEMETRY_BIND_ADDR:?set TELEMETRY_BIND_ADDR in collector/.env}:4318:4318"   # OTLP HTTP
+      - "${TELEMETRY_BIND_ADDR:?set TELEMETRY_BIND_ADDR in collector/.env}:13133:13133" # health
     depends_on: [victoriametrics, loki]
 
   victoriametrics:
-    image: victoriametrics/victoria-metrics:v1.154.1
+    image: victoriametrics/victoria-metrics:v1.154.1@sha256:c7884f32920dd45a9d86542a717227e63af03e060e53bbf8031e6e6fd0e1e05d
     command:
       - "-storageDataPath=/victoria"
       - "-retentionPeriod=5y"
@@ -28,27 +41,41 @@ services:
       - "-opentelemetry.usePrometheusNaming=true"
     restart: unless-stopped
     volumes:
-      - ${TELEMETRY_ROOT}/victoria:/victoria
+      - ${TELEMETRY_ROOT:?set TELEMETRY_ROOT in collector/.env}/victoria:/victoria
     ports:
-      - "8428:8428"
+      - "${TELEMETRY_BIND_ADDR:?set TELEMETRY_BIND_ADDR in collector/.env}:8428:8428"
 
   loki:
-    image: grafana/loki:3.7.9
+    image: grafana/loki:3.7.9@sha256:0db216b630ae1f348a1584c67f3cead8b4c1fc839169a39501db664744158e28
     command: ["-config.file=/etc/loki/config.yaml"]
     restart: unless-stopped
     volumes:
       - ./loki-config.yaml:/etc/loki/config.yaml:ro
-      - ${TELEMETRY_ROOT}/loki:/loki
+      - ${TELEMETRY_ROOT:?set TELEMETRY_ROOT in collector/.env}/loki:/loki
     ports:
-      - "3100:3100"
+      - "${TELEMETRY_BIND_ADDR:?set TELEMETRY_BIND_ADDR in collector/.env}:3100:3100"
 
   tempo:
     # Optional. Comment out until something emits traces.
-    image: grafana/tempo:2.10.10
+    image: grafana/tempo:2.10.10@sha256:12b0820f13ffa10ce956b6e9acc3b03f3cffded99109be6cc09d106fe56e5d38
     command: ["-config.file=/etc/tempo/config.yaml"]
     restart: unless-stopped
     volumes:
       - ./tempo.yaml:/etc/tempo/config.yaml:ro
-      - ${TELEMETRY_ROOT}/tempo:/tempo
+      - ${TELEMETRY_ROOT:?set TELEMETRY_ROOT in collector/.env}/tempo:/var/tempo
     ports:
-      - "3200:3200"
+      - "${TELEMETRY_BIND_ADDR:?set TELEMETRY_BIND_ADDR in collector/.env}:3200:3200"
+
+  # Smoke test only; `docker compose up -d` never starts it (profile `smoke`).
+  # Sends synthetic telemetry to the Collector over the compose network, so it needs
+  # no published port and behaves the same on Linux. Run, for example:
+  #   docker compose --profile smoke run --rm telemetrygen
+  #   docker compose --profile smoke run --rm telemetrygen metrics --otlp-endpoint=otel-collector:4317 --otlp-insecure --metrics=1
+  # Flags from the telemetrygen README (Apache-2.0), retrieved 2026-10-21:
+  # https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/main/cmd/telemetrygen/README.md
+  # v0.163.0 is the newest telemetrygen tag at or below the Collector's 0.163.1.
+  telemetrygen:
+    image: ghcr.io/open-telemetry/opentelemetry-collector-contrib/telemetrygen:v0.163.0@sha256:569b79a39f8313db839a727e8eac161c66b8a6c2e633f2da4ad352ce7b383c23
+    profiles: [smoke]
+    command: ["traces", "--otlp-endpoint=otel-collector:4317", "--otlp-insecure", "--traces=1"]
+    depends_on: [otel-collector]

@@ -84,13 +84,16 @@ leaderboards; this only has to answer questions about my own setup.
    landing.
 3. Collector VM bring-up and server-metrics join: deploy the validated stack under
    `collector/`, ship ledgers from the Mac, scrape the inference host, and join each run's time
-   window to the server metrics.
+   window to the server metrics. Specs: 0003 (local stack on the Mac), 0004
+   (landing-zone shipping and ledger ingestion), 0005 (server-metrics join), 0006
+   (telemetry VM deployment), 0007 (host-local model metrics scraper).
 4. Later: the review and labeling app; the Langfuse importer and optional viewer
    (useful for employability as well as browsing; see `analysis/README.md`).
 
 ## Open questions
 
-- Which llama.cpp endpoints (`/metrics`, `/slots`) the Strata and Project Maya
-  builds expose; settles unit 3's scrape targets.
+- Resolved 2026-10-21 (spec 0003): which llama.cpp endpoints (`/metrics`,
+  `/slots`) the Strata and Project Maya builds expose. See `collector/README.md`
+  → Inference server endpoints. Per-model scraping moved to spec 0007.
 - Whether the Collector's landing-zone tailing or a nightly batch load is the better path
   for session transcripts, which can be large; settles in unit 3.
