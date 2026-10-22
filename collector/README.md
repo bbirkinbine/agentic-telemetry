@@ -1,9 +1,10 @@
 # Telemetry stack: the source-agnostic collector
 
-> Status, 2026-10-21: the stack runs on the Mac under OrbStack, a
+> Status, 2026-10-22: the stack runs on the Mac under OrbStack, a
 > Docker-compatible runtime (spec 0003), and passed a live smoke test. Per-model server metrics come from an agent on
-> the inference host (spec 0007, `inference-agent/`). The stack has not yet been
-> deployed to the VM (spec 0006). See *Verification* at the end.
+> the inference host (spec 0007, `inference-agent/`). Spec 0006 moves it to the
+> telemetry VM; its repository changes are done and the bring-up is in progress.
+> See *Verification* at the end.
 
 ## What it is
 
@@ -43,11 +44,11 @@ samples to the Collector as OTLP on 4318 (*Inference host agent*).
 | Item | Value | Why |
 |---|---|---|
 | Name | `telemetry` | separate failure domain from the existing monitoring VM, which is too small to add three stores |
-| OS | Ubuntu 24.04, Docker + compose | same as the rest of the lab |
+| OS | Ubuntu 24.04 LTS (`noble`), amd64; Docker Engine (`docker-ce`) and `docker-compose-plugin` from Docker's apt repository | same as the rest of the lab (0006, D3) |
 | Size | 4 vCPU, 8 GB RAM, 250 GB thin disk | single-developer volume is tiny; disk is the only thing that grows |
-| Network | LAN + Tailscale, no public exposure | same policy as the inference gateway in `ENDPOINTS.md` |
+| Network | ports published on the VM's LAN IP only (DHCP reservation); no Tailscale on the VM: Tailnet clients reach it through the existing subnet router; no public exposure | same policy as the inference gateway in `ENDPOINTS.md`; one address avoids a Tailnet IP failing to bind before `tailscaled` starts (0006) |
 | Storage | `/srv/telemetry/{archive,landing,collector-state,victoria,loki,tempo}` | archive can be an NFS mount from the NAS |
-| Backup | PBS backs up the VM; archive is also rsynced to the NAS | the archive is the irreplaceable part |
+| Backup | PBS backs up the VM; the archive is also rsynced to the NAS (shown here as `nas.example`) | the archive is the irreplaceable part |
 
 ## Services (compose.yaml)
 
@@ -196,7 +197,8 @@ telemetry VM (spec 0006). Only the untracked `.env` differs.
      - To see what is open away from home, `lsof -nP -iTCP:4318 -iTCP:8428
        -sTCP:LISTEN`: a `*:` address means all interfaces, so run
        `docker compose stop`.
-     - The VM uses its LAN or Tailnet address (spec 0006).
+     - The VM uses its LAN address; the Tailnet reaches it through the subnet
+       router (spec 0006).
 
    Compose stops with `set <NAME> in collector/.env` when one is missing.
 2. Create the data root. Write `root` out as an absolute path. Compose expands
@@ -317,12 +319,12 @@ Install:
    single-file mount.
 
 2. In the install directory, `cp env.example .env` and set:
-   - `TELEMETRY_OTLP_ENDPOINT`: the stack's OTLP/HTTP address. While the stack
-     runs on the Mac, the Mac's current LAN address, from `ENDPOINTS.md`. Not
-     its `.local` name: the agent is a static Go binary that cannot resolve
-     mDNS, even where the host can. If the Mac's address changes, update this
-     value and run `docker compose up -d`; the queue holds samples meanwhile.
-     Spec 0006 repoints it to the VM.
+   - `TELEMETRY_OTLP_ENDPOINT`: the stack's OTLP/HTTP address, the telemetry
+     VM's LAN address from `ENDPOINTS.md` (spec 0006; while the stack ran on the
+     Mac, it was the Mac's LAN address). Use an address, not a `.local` name:
+     the agent is a static Go binary that cannot resolve mDNS, even where the
+     host can. If the stack's address changes, update this value and run
+     `docker compose up -d`; the queue holds samples meanwhile.
    - `AGENT_QUEUE_DIR` and `AGENT_TARGETS_DIR`: keep the example paths unless the
      host needs others.
 3. Create the queue and targets directories. The image runs as UID 10001:
@@ -454,9 +456,13 @@ Timeline for one session:
    a line far behind the newest one in its stream. A project's ledger files
    share that stream, so once Phase 1 writes one `telemetry/<session>.jsonl` per
    session, a backfill or an outage of more than an hour can still refuse an
-   older session's lines; revisit the labels then (0004, D8). Loki also refuses lines older
-   than a week (`reject_old_samples_max_age: 1w`, its default in 3.7.9), so a
-   first backfill of older ledger lines reaches only the archive (0004, D1, D4).
+   older session's lines; revisit the labels then (0004, D8). Loki accepts lines
+   as old as its 730-day retention (`reject_old_samples_max_age: 17520h`, spec
+   0006; the 3.7.9 default is one week; Loki 3.7.x request-validation docs,
+   AGPL-3.0, cited not copied, retrieved 2026-10-22:
+   https://grafana.com/docs/loki/v3.7.x/operations/request-validation-rate-limits/),
+   so a fresh VM's first ship cycle backfills every ledger line into Loki as well
+   as the archive.
 4. Nightly: the analysis package rebuilds the run table and matrices from the archive
    and landing zone into Parquet.
 
@@ -477,9 +483,15 @@ look at in a year; the raw records are what you go back to when a number looks w
 
 ## Bring-up order
 
-1. Create the VM, mount `/srv/telemetry`, install Docker.
-2. `cp env.example .env` and set the three variables, then create the data root, as
-   in *Run locally on the Mac*. `docker compose up -d`.
+1. Create the VM (Ubuntu 24.04 LTS, amd64) with a DHCP reservation for its LAN
+   address, mount `/srv/telemetry`, and install Docker Engine and the Compose
+   plugin from Docker's apt repository.
+2. Copy exactly `compose.yaml env.example otel-collector.yaml loki-config.yaml
+   tempo.yaml` from the Mac's `collector/` with `scp` (never the Mac's `.env`; no
+   repository credentials on the VM). `cp env.example .env` and set the three variables,
+   with `TELEMETRY_BIND_ADDR` = the VM's LAN address and `TELEMETRY_ROOT=/srv/telemetry`.
+   Create the data root as in *Run locally on the Mac* (the Linux ownership
+   steps). `docker compose up -d`.
 3. Check Collector health on the bind address, for example
    `curl -fsS http://192.0.2.10:13133`, replacing `192.0.2.10` with the
    `TELEMETRY_BIND_ADDR` value from `.env`. Validate `otel-collector.yaml` before the first
@@ -487,9 +499,32 @@ look at in a year; the raw records are what you go back to when a number looks w
 4. Send a synthetic span with `telemetrygen` or point one Claude Code session at it with the client snippet; confirm a file appears under `archive/` and the metric shows in VictoriaMetrics' `/api/v1/query`.
 5. Add the three Grafana data sources on the monitoring VM.
 6. Add the VM and ports to `ENDPOINTS.md` in the vault.
-7. Run `mac-agent/ship-ledgers.sh` on each Mac (`--help` lists its options;
-   set `PROJECTS_ROOT` to where your projects live), then schedule it under
-   launchd (0006).
+7. On each Mac, ship evidence to the VM and schedule it (spec 0006):
+   1. Give the VM's address a `Host 192.0.2.10` stanza with your `User` in
+      `~/.ssh/config`, then accept its host key once (`ssh 192.0.2.10 true`).
+      `TELEMETRY_VM` must be the address, not an ssh alias: the script probes it
+      with `nc`. The script runs ssh with `BatchMode=yes`, so
+      `ssh -o BatchMode=yes 192.0.2.10 true` must succeed without a prompt.
+   2. Run `mac-agent/ship-ledgers.sh` once by hand with `TELEMETRY_VM` and
+      `PROJECTS_ROOT` set (`--help` lists its options); it prints one `shipped`
+      line per project and client. Over ssh, project directory names must use
+      only letters, digits, `.`, `_` and `-`; others are skipped (exit 1), since
+      the VM's shell would split them.
+   3. Copy `mac-agent/com.example.ship-ledgers.plist` to
+      `~/Library/LaunchAgents/`, replace its placeholder paths and VM address
+      (point the log paths at a directory that already exists, written as the
+      absolute path of `~/Library/Logs/`: launchd neither expands `~` nor
+      creates a missing directory, and the job would not start), then `plutil -lint` it, `launchctl bootstrap gui/$(id -u) <plist>` and
+      `launchctl kickstart gui/$(id -u)/com.example.ship-ledgers`. After editing a
+      loaded plist, `launchctl bootout gui/$(id -u)/com.example.ship-ledgers`
+      first. If the log stays empty, `launchctl print
+      gui/$(id -u)/com.example.ship-ledgers` shows the `last exit code`.
+   4. Read the log file the plist names. A `no projects found` or `Operation
+      not permitted` line means macOS privacy hid the projects folder from the
+      job: grant Full Disk Access to `/bin/bash` (every launchd-run bash job then
+      has it) and kickstart again (0006, D5).
+8. Once the VM is live, `docker compose stop` the Mac's stack; its data root stays
+   as a test bed, started on `127.0.0.1` for config trials (0006, D6).
 
 ## Verification
 
@@ -666,6 +701,15 @@ Validated today with the pinned images, on the Mac, via Docker:
     default). A line with an old timestamp is only queryable after Loki flushes
     it to storage (`query_ingesters_within: 3h`).
 
+- Telemetry VM, spec 0006, repository changes on the Mac, 2026-10-22:
+  - `loki-config.yaml` (`reject_old_samples_max_age: 17520h`) reports "config
+    is valid" on the `linux/arm64` and `linux/amd64` entries of the 3.7.9 index
+    (amd64 by its manifest digest, under emulation). `-print-config-stderr` shows
+    `reject_old_samples_max_age: 2y`.
+  - `mac-agent/com.example.ship-ledgers.plist`: `plutil -lint` OK.
+  - `docker compose --env-file env.example config --quiet` passes after the
+    comment-only change to `compose.yaml`.
+
 Not yet done:
-- the VM deployment (spec 0006);
+- the VM bring-up (spec 0006, Phase B);
 - the Codex `[otel]` exporter syntax.

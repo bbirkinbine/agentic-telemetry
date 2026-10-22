@@ -48,6 +48,14 @@ def _inodes(root: Path) -> dict[str, int]:
     }
 
 
+def _first_operand(ssh_argv: list[str]) -> str | None:
+    """Return ssh's first non-option argument, skipping `-o VALUE` style pairs (spec 0006)."""
+    index = 0
+    while index < len(ssh_argv) and ssh_argv[index].startswith("-"):
+        index += 2 if ssh_argv[index] in {"-o", "-i", "-p", "-l", "-F", "-J"} else 1
+    return ssh_argv[index] if index < len(ssh_argv) else None
+
+
 def test_second_run_recopies_nothing(env: ShipEnv) -> None:
     dest = env.root / "landing"
     first = run_ship(env, "--dest", str(dest))
@@ -150,7 +158,7 @@ def test_remote_mode_creates_the_landing_directory_with_one_ssh(env: ShipEnv) ->
     assert result.returncode == 0, describe(result)
     ssh_calls = stub_calls(env, "ssh")
     assert len(ssh_calls) == 1, f"expected a single ssh call, got {ssh_calls}"
-    assert ssh_calls[0][0] == DEFAULT_VM, f"expected ssh to the VM, got {ssh_calls[0]}"
+    assert _first_operand(ssh_calls[0]) == DEFAULT_VM, f"expected ssh to the VM, got {ssh_calls[0]}"
     assert any(arg.startswith(f"{DEFAULT_LANDING}/") for arg in ssh_calls[0]), ssh_calls[0]
 
 

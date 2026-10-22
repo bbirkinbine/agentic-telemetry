@@ -1,4 +1,5 @@
-# Loki single-binary, filesystem storage, 2-year retention. Assembled from docs; not yet run.
+# Loki single-binary, filesystem storage, 2-year retention. Runs on the Mac (0003)
+# and on the telemetry VM (0006).
 auth_enabled: false
 
 server:
@@ -28,6 +29,12 @@ schema_config:
 limits_config:
   allow_structured_metadata: true      # required for OTLP ingest
   retention_period: 17520h             # 730 days
+  # Accept lines as old as the retention period, so a fresh VM's first ship
+  # cycle backfills every ledger line instead of only the last week (spec 0006).
+  # The default is one week; older lines are refused as `greater_than_max_sample_age`.
+  # Loki 3.7.x docs (AGPL-3.0, cited, not copied), retrieved 2026-10-22:
+  # https://grafana.com/docs/loki/v3.7.x/operations/request-validation-rate-limits/
+  reject_old_samples_max_age: 17520h
   otlp_config:
     resource_attributes:
       attributes_config:

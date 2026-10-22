@@ -25,6 +25,8 @@ AGENT_CONFIG = AGENT_DIR / "otel-agent.yaml"
 AGENT_ENV_EXAMPLE = AGENT_DIR / "env.example"
 AGENT_TARGETS_EXAMPLE = AGENT_DIR / "targets.example.json"
 AGENT_SERVICE = "otel-agent"
+# Spec 0006: the launchd job that runs ship-ledgers.sh every 15 minutes on the Mac.
+SHIP_PLIST = COLLECTOR_DIR / "mac-agent" / "com.example.ship-ledgers.plist"
 
 # The tracked collector files the hygiene rules scan. Never `landing/` evidence.
 HYGIENE_FILES = (
@@ -37,6 +39,7 @@ HYGIENE_FILES = (
     "collector/landing/README.md",
     "collector/mac-agent/otel-agent.yaml",
     "collector/mac-agent/ship-ledgers.sh",
+    "collector/mac-agent/com.example.ship-ledgers.plist",
     "collector/clients/claude-code-user-settings.json",
     "collector/inference-agent/compose.yaml",
     "collector/inference-agent/otel-agent.yaml",

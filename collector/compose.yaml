@@ -3,7 +3,8 @@
 # (start from env.example); compose stops with the named variable if one is unset.
 # Ports bind to TELEMETRY_BIND_ADDR: on the Mac, 0.0.0.0 on the home network so the
 # inference host agent can reach the Collector (spec 0007) and 127.0.0.1 elsewhere;
-# on the VM, its LAN or Tailnet address. Grafana runs on the existing monitoring VM
+# on the VM, its LAN address (the Tailnet reaches it through the subnet router,
+# spec 0006). Grafana runs on the existing monitoring VM
 # and queries the stores.
 #
 # Images are pinned by multi-arch index digest, so the Mac (linux/arm64) and an x86
