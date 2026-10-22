@@ -73,12 +73,22 @@ def test_differing_run_through_two_inputs_raises_naming_both_ledgers(tmp_path: P
     assert str(landing_ledger) in message
 
 
-def test_stale_copy_missing_a_review_is_a_conflict(tmp_path: Path) -> None:
-    work, _, landing, landing_ledger = _project_and_landing_copy(tmp_path)
+def test_stale_copy_missing_a_review_yields_the_reviewed_row_with_a_warning(
+    tmp_path: Path,
+) -> None:
+    """Spec 0004 reverses 0001's default: a stale copy is no longer a conflict."""
+    work, work_ledger, landing, landing_ledger = _project_and_landing_copy(tmp_path)
     write_ledger(landing_ledger.parent, [run_record("run-shared")])
 
-    with pytest.raises(ConflictingRunError):
-        build_run_table([work, landing])
+    rows, summary = build_run_table([landing, work])
+
+    assert [row.run_id for row in rows] == ["run-shared"]
+    assert rows[0].review_count == 1
+    assert Path(rows[0].ledger_path).resolve() == work_ledger.resolve()
+    assert any(
+        "run-shared" in warning and str(work_ledger) in warning and str(landing_ledger) in warning
+        for warning in summary.warnings
+    ), summary.warnings
 
 
 def test_identical_duplicate_rows_inside_one_ledger_collapse(tmp_path: Path) -> None:

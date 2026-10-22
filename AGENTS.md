@@ -125,6 +125,9 @@ tool swap changes one file.
 - Session table: `uv run agentic-telemetry session-table --out data/session_table.parquet [DIR...]`
   (no DIR = each client's default session directory; DIR = session directories,
   project roots or landing-zone copies)
+- Ship evidence to a landing zone: `collector/mac-agent/ship-ledgers.sh --dest DIR`
+  (or over SSH to `TELEMETRY_VM` without `--dest`; `--help` lists options and
+  environment). Set `PROJECTS_ROOT` to the directory above your projects.
 - Run tests: `.agentic/toolchain.sh test` (`uv run pytest`)
 - Single test: `.agentic/toolchain.sh test path/to/test.py::test_name`
 - Lint / format / type-check: `.agentic/toolchain.sh lint | format | typecheck`
@@ -310,13 +313,24 @@ Rules for anything that comes from outside:
     That run joined `exact`, and the review verdict `model-defect` demoted the
     model for `phase:implement`. Delegation is active for this checkout
     (`policy = auto`).
-- Roadmap unit 3 continues in draft specs:
-  - 0004: landing-zone shipping and ledger ingestion. It also revisits two 0001
-    defaults: a stale landing-zone copy is a conflict that exits 1, and an
-    inbox-era ledger path takes `delegate` as its `project`.
-  - 0006: the VM deployment.
-- Next: 0004 (then 0006), server columns for the session table (a follow-up 0005
-  names), or the rest of roadmap unit 2 once the scaffold's Phase 1 lands.
+- Spec 0004 (landing-zone shipping) is shipped:
+  - `collector/mac-agent/ship-ledgers.sh` finds projects up to `--max-depth`
+    below `PROJECTS_ROOT`. It copies only what `run-table` reads, keeping
+    `.agentic` in the path, plus client transcripts to `_sessions/`. It copies
+    over SSH, or with `--dest DIR` into a local landing zone. It never deletes
+    and never copies a symlink. Two projects with one name are skipped (exit 1).
+  - The Collector tails only ledgers, timestamps each line with its own `ts`,
+    and gives each project its own Loki stream. Transcripts are read in batch,
+    never tailed. Loki refuses lines older than a week; the archive keeps them.
+  - `run-table` keeps the copy with more reviews when one is a stale copy of
+    the other, with a warning. Any other difference still exits 1.
+  - The local landing zone gives the same run and session rows as the project
+    roots.
+- Roadmap unit 3 continues in draft spec 0006, the VM deployment. It takes
+  over launchd scheduling for the ship script, the easier inference-host install,
+  and Loki's history window.
+- Next: 0006, server columns for the session table (a follow-up 0005 names), or
+  the rest of roadmap unit 2 once the scaffold's Phase 1 lands.
 
 <!-- agentic-scaffold:standing-rules:start -->
 

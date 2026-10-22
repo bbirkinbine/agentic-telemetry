@@ -65,6 +65,23 @@ def test_project_uses_dot_agentic_parent_inside_an_landing_copy(tmp_path: Path) 
     assert project_name(ledger) == "local-game"
 
 
+def test_landing_host_dir_names_each_project_after_its_dot_agentic_parent(
+    tmp_path: Path,
+) -> None:
+    """Spec 0004: `landing/<host>/<project>/.agentic/delegate/ledger.jsonl` keeps `project`."""
+    host = tmp_path / "landing" / LANDING_HOST
+    for name in ("local-game", "other-game"):
+        write_ledger(host / name / ".agentic" / "delegate", [run_record(f"run-{name}")])
+    sessions = host / "_sessions" / "pi" / "--workspace--"
+    sessions.mkdir(parents=True)
+    (sessions / "session.jsonl").write_text("{}\n", encoding="utf-8")
+
+    found = find_ledgers([host])
+
+    assert sorted(item.project for item in found) == ["local-game", "other-game"]
+    assert "delegate" not in {item.project for item in found}
+
+
 def test_project_name_falls_back_to_ledger_parent_directory_name(tmp_path: Path) -> None:
     ledger = tmp_path / "landing" / LANDING_HOST / "local-game" / "ledger.jsonl"
     assert project_name(ledger) == "local-game"

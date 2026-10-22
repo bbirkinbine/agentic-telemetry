@@ -95,5 +95,6 @@ leaderboards; this only has to answer questions about my own setup.
 - Resolved 2026-10-21 (spec 0003): which llama.cpp endpoints (`/metrics`,
   `/slots`) the Strata and Project Maya builds expose. See `collector/README.md`
   → Inference server endpoints. Per-model scraping moved to spec 0007.
-- Whether the Collector's landing-zone tailing or a nightly batch load is the better path
-  for session transcripts, which can be large; settles in unit 3.
+- Resolved 2026-10-22 (spec 0004): session transcripts are read in batch from the
+  landing zone by `run-table` and `session-table`; the Collector tails only
+  ledgers, so captured tool content never reaches Loki.

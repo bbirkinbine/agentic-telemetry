@@ -3,7 +3,7 @@
 from collections.abc import Sequence
 from pathlib import Path
 
-from agentic_telemetry.run_table.dedupe import merge_runs
+from agentic_telemetry.run_table.dedupe import ReviewMultiset, merge_runs
 from agentic_telemetry.run_table.discovery import find_ledgers
 from agentic_telemetry.run_table.join import assemble_ledger
 from agentic_telemetry.run_table.row import RunRow
@@ -28,10 +28,13 @@ def build_run_table(dirs: Sequence[Path]) -> tuple[list[RunRow], Summary]:
     discovered = find_ledgers(dirs)
     summary = Summary(ledgers_found=len(discovered))
     all_rows: list[RunRow] = []
+    reviews: dict[tuple[str, str], ReviewMultiset] = {}
     orphan_ids: set[str] = set()
     for ledger in discovered:
         assembled = assemble_ledger(ledger)
         all_rows.extend(assembled.rows)
+        for run_id, multiset in assembled.review_keys.items():
+            reviews[(str(ledger.path), run_id)] = multiset
         for orphan in assembled.orphans:
             # A project root and its landing copy hold the same orphan; list it once.
             if orphan not in orphan_ids:
@@ -42,7 +45,8 @@ def build_run_table(dirs: Sequence[Path]) -> tuple[list[RunRow], Summary]:
             warning for warning in assembled.warnings if warning not in summary.warnings
         )
 
-    rows = merge_runs(all_rows)
+    rows, merge_warnings = merge_runs(all_rows, reviews)
+    summary.warnings.extend(merge_warnings)
     for row in rows:
         summary.rows_per_project[row.project] = summary.rows_per_project.get(row.project, 0) + 1
     summary.reviews_joined = sum(1 for row in rows if row.review_count)

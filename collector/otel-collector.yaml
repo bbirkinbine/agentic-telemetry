@@ -27,10 +27,24 @@ receivers:
       http:
         endpoint: 0.0.0.0:4318
 
-  # Anything that cannot speak OTLP drops JSONL here (rsync from the Macs).
-  # One file per session or run; one JSON object per line.
+  # Ledgers shipped by mac-agent/ship-ledgers.sh (spec 0004); one JSON object per
+  # line. Only ledgers are tailed: transcripts (landing/<host>/_sessions/ and each
+  # delegate run's results/<run>/session/) carry captured tool content, so they
+  # stay files that run-table and session-table read in batch.
+  # `include` globs: filelog receiver README (Apache-2.0), retrieved 2026-10-22,
+  # https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/v0.163.0/receiver/filelogreceiver/README.md
+  # (v0.163.0 is the newest tag at or below the 0.163.1 image).
+  # Timestamp: `gotime` uses Go's own parser (stanza timestamp docs, Apache-2.0,
+  # retrieved 2026-10-22,
+  # https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/v0.163.0/pkg/stanza/docs/types/timestamp.md).
+  # Go's time.Parse accepts a fractional second after the seconds "even if the
+  # layout does not signify its presence" (BSD-3-Clause, retrieved 2026-10-22,
+  # https://pkg.go.dev/time#Parse), so one layout reads both the ledger's
+  # `...:56Z` and `...:56.123Z`; its zone field also takes a `+00:00` offset.
   filelog/landing:
-    include: [/landing/**/*.jsonl]
+    include:
+      - /landing/*/*/.agentic/delegate/ledger.jsonl
+      - /landing/*/*/.agentic/telemetry/*.jsonl
     start_at: beginning
     storage: file_storage
     include_file_path: true
@@ -39,11 +53,20 @@ receivers:
         parse_from: body
         timestamp:
           parse_from: attributes.ts
-          layout: '%Y-%m-%dT%H:%M:%S.%LZ'
-          layout_type: strptime
+          layout: '2006-01-02T15:04:05Z07:00'
+          layout_type: gotime
         on_error: send_quiet        # a malformed line is kept as raw text, not dropped
-      - type: regex_parser           # /landing/<host>/<project>/<file>  ->  attributes
+      # /landing/<host>/<project>/.agentic/... -> resource attributes, which
+      # loki-config.yaml makes index labels: one Loki stream per project. As log
+      # attributes they were only structured metadata, every ledger shared one
+      # stream, and Loki refused a line "too far behind" another project's newer
+      # one (spec 0004, D4). `parse_to` (default `attributes`) takes a field, and
+      # `resource` is a field prefix: stanza regex_parser and field docs, v0.163.0,
+      # Apache-2.0, retrieved 2026-10-22,
+      # https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/v0.163.0/pkg/stanza/docs/operators/regex_parser.md
+      - type: regex_parser
         parse_from: attributes["log.file.path"]
+        parse_to: resource
         regex: '^/landing/(?P<landing_host>[^/]+)/(?P<landing_project>[^/]+)/'
         on_error: send_quiet
 
