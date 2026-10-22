@@ -63,3 +63,8 @@ collector/.env
 data/
 *.parquet
 *.duckdb
+
+# Real targets files for the inference host agent (spec 0007) live on that host;
+# only the placeholder example is tracked.
+collector/inference-agent/targets*.json
+!collector/inference-agent/targets.example.json

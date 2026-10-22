@@ -155,8 +155,11 @@ Changes here may need coordinated changes out there.
 
 - Telemetry VM (Proxmox): the collector stack; address in the vault's
   `ENDPOINTS.md`, not here; only the human deploys or restarts it
-- The local inference host: llama-swap gateway and llama.cpp upstreams whose
-  `/metrics` the Collector scrapes; LAN/Tailnet only, no credentials
+- The local inference host: the llama-swap gateway, whose own `/metrics` the
+  stack's Collector scrapes, and the inference host agent
+  (`collector/inference-agent/`, spec 0007), installed there by the host's
+  sysadmin, which scrapes each model server's own port; LAN/Tailnet only, no
+  credentials
 - agentic-scaffold (public repo): produces the ledger format this repo reads;
   format changes there need a reader change here
 - Obsidian vault `Projects/Agentic Scaffold Telemetry/`: the plan of record

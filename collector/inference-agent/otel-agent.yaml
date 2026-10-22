@@ -1,0 +1,88 @@
+# Inference host agent config (spec 0007). Scrapes each model server's own
+# Prometheus endpoint on the inference host and sends the samples as OTLP to the
+# telemetry stack's Collector, which stores them and archives them.
+#
+# Every target is a model server's own local port, never llama-swap: requests
+# that llama-swap proxies to a model reset that model's idle TTL (spec 0003, D6),
+# while a request straight to the model's port does not. An unloaded model's
+# port refuses the connection, so its `up` drops to 0 and nothing loads it.
+#
+# Targets, their `model_id` labels and their metrics paths come from the
+# untracked targets directory (format: targets.example.json). Edits are picked
+# up without a restart. In this file the Collector expands `$` as an environment
+# variable, so a literal `$` is written `$$`. Values in targets.json are literal.
+#
+# Do not add a second scraper for the same llama.cpp server: each /metrics call
+# resets its throughput gauges, which average over the window between scrapes.
+#
+# Validate against the pinned image (see ../README.md -> Verification).
+
+extensions:
+  health_check:
+    endpoint: 127.0.0.1:13133
+  file_storage/queue:
+    directory: /var/lib/otelcol/queue
+    create_directory: true
+    compaction:
+      on_start: true
+      on_rebound: true
+      directory: /var/lib/otelcol/queue
+
+receivers:
+  prometheus/models:
+    config:
+      scrape_configs:
+        - job_name: inference-models
+          scrape_interval: 30s
+          file_sd_configs:
+            - files: ["/etc/otelcol/targets/*.json"]
+              refresh_interval: 30s
+          # Guard against a hand-edited targets.json: a target routed through
+          # llama-swap's upstream route would reset that model's TTL on every
+          # scrape (spec 0003 D6), so it is dropped before it is ever scraped.
+          relabel_configs:
+            - source_labels: [__metrics_path__]
+              regex: ".*/upstream/.*"
+              action: drop
+
+processors:
+  memory_limiter:
+    check_interval: 5s
+    limit_mib: 200
+    spike_limit_mib: 50
+  batch:
+    timeout: 5s
+
+exporters:
+  # Persistent queue: samples wait on disk while the stack is unreachable (the
+  # Mac asleep or away) and are delivered when it returns. Retries never stop;
+  # the queue size is the cap. Each target sends about 2880 requests a day (one
+  # per 30 s scrape, loaded or not), so with two targets 100000 requests is about
+  # two weeks; each added target shortens that proportionally.
+  otlphttp/stack:
+    endpoint: ${env:TELEMETRY_OTLP_ENDPOINT}
+    sending_queue:
+      enabled: true
+      storage: file_storage/queue
+      queue_size: 100000
+    retry_on_failure:
+      enabled: true
+      initial_interval: 10s
+      max_interval: 1m
+      max_elapsed_time: 0
+
+service:
+  extensions: [health_check, file_storage/queue]
+  telemetry:
+    metrics:
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 127.0.0.1
+                port: 8888
+  pipelines:
+    metrics:
+      receivers: [prometheus/models]
+      processors: [memory_limiter, batch]
+      exporters: [otlphttp/stack]

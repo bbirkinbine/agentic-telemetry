@@ -1,4 +1,4 @@
-"""Read-only helpers for the static checks on tracked files under `collector/` (spec 0003).
+"""Read-only helpers for the static checks on tracked files under `collector/` (specs 0003, 0007).
 
 Every loader asserts the file exists first, so a missing file is an `AssertionError`
 naming the path and the expectation, never a `FileNotFoundError`.
@@ -18,6 +18,13 @@ COMPOSE = COLLECTOR_DIR / "compose.yaml"
 OTEL_CONFIG = COLLECTOR_DIR / "otel-collector.yaml"
 ENV_EXAMPLE = COLLECTOR_DIR / "env.example"
 README = COLLECTOR_DIR / "README.md"
+# Spec 0007: the scraper agent on the inference host. Paths only; nothing is read at import.
+AGENT_DIR = COLLECTOR_DIR / "inference-agent"
+AGENT_COMPOSE = AGENT_DIR / "compose.yaml"
+AGENT_CONFIG = AGENT_DIR / "otel-agent.yaml"
+AGENT_ENV_EXAMPLE = AGENT_DIR / "env.example"
+AGENT_TARGETS_EXAMPLE = AGENT_DIR / "targets.example.json"
+AGENT_SERVICE = "otel-agent"
 
 # The tracked collector files the hygiene rules scan. Never `landing/` evidence.
 HYGIENE_FILES = (
@@ -31,6 +38,10 @@ HYGIENE_FILES = (
     "collector/mac-agent/otel-agent.yaml",
     "collector/mac-agent/ship-ledgers.sh",
     "collector/clients/claude-code-user-settings.json",
+    "collector/inference-agent/compose.yaml",
+    "collector/inference-agent/otel-agent.yaml",
+    "collector/inference-agent/env.example",
+    "collector/inference-agent/targets.example.json",
 )
 
 _HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
@@ -128,15 +139,15 @@ def iter_strings(node: object) -> Iterator[str]:
             yield from iter_strings(item)
 
 
-def parse_env_example() -> dict[str, str]:
-    """Parse `collector/env.example` into `{NAME: value}`, skipping comments and blanks."""
+def parse_env_example(path: Path = ENV_EXAMPLE) -> dict[str, str]:
+    """Parse an `env.example` into `{NAME: value}`, skipping comments and blanks."""
     values: dict[str, str] = {}
-    for line_no, line in enumerate(read_text(ENV_EXAMPLE).splitlines(), start=1):
+    for line_no, line in enumerate(read_text(path).splitlines(), start=1):
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
         name, sep, value = stripped.removeprefix("export ").partition("=")
-        assert sep, f"{relative(ENV_EXAMPLE)}:{line_no}: expected NAME=value, got {line!r}"
+        assert sep, f"{relative(path)}:{line_no}: expected NAME=value, got {line!r}"
         value = value.strip()
         if value[:1] in {'"', "'"} and value.endswith(value[0]) and len(value) >= 2:
             value = value[1:-1]
@@ -144,6 +155,51 @@ def parse_env_example() -> dict[str, str]:
             value = re.split(r"\s+#", value, maxsplit=1)[0].strip()
         values[name.strip()] = value
     return values
+
+
+def agent_services() -> dict[str, dict[str, object]]:
+    """Return `services` from `collector/inference-agent/compose.yaml`, keyed by name."""
+    services = load_yaml_mapping(AGENT_COMPOSE).get("services")
+    assert isinstance(services, dict) and services, (
+        f"expected {relative(AGENT_COMPOSE)} to define a non-empty `services` mapping"
+    )
+    for name, body in services.items():
+        assert isinstance(body, dict), f"expected agent compose service {name!r} to be a mapping"
+    return services
+
+
+def agent_service() -> dict[str, object]:
+    """Return the `otel-agent` service, asserting it is defined."""
+    services = agent_services()
+    assert AGENT_SERVICE in services, (
+        f"expected compose service {AGENT_SERVICE!r} in {relative(AGENT_COMPOSE)}"
+    )
+    return services[AGENT_SERVICE]
+
+
+def volume_mounts(service: dict[str, object]) -> list[tuple[str, str, str]]:
+    """Return `(source, target, mode)` for each short or long-syntax compose volume."""
+    mounts: list[tuple[str, str, str]] = []
+    for entry in as_list(service.get("volumes")):
+        if isinstance(entry, dict):
+            mode = "ro" if entry.get("read_only") else ""
+            mounts.append((str(entry.get("source") or ""), str(entry.get("target") or ""), mode))
+            continue
+        parts = split_outside_braces(str(entry))
+        source = parts[0]
+        target = parts[1] if len(parts) > 1 else ""
+        mounts.append((source, target, parts[2] if len(parts) > 2 else ""))
+    return mounts
+
+
+def agent_mount_target(variable: str) -> str:
+    """Return the container path the agent mounts from the required `${variable:?...}`."""
+    prefix = "${" + variable + ":?"
+    targets = [t for s, t, _ in volume_mounts(agent_service()) if s.startswith(prefix)]
+    assert len(targets) == 1, (
+        f"expected exactly one {AGENT_SERVICE} volume from {prefix}...}}, got {targets}"
+    )
+    return targets[0]
 
 
 def _headings(lines: list[str]) -> Iterator[tuple[int, int, str]]:
