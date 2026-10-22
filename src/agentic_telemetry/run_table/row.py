@@ -66,6 +66,29 @@ class RunRow:
     assistant_turns: int | None
     compactions: int | None
     retries: int | None
+    # Model names the run's own transcript recorded: null with no transcript (spec 0005).
+    # `served_models` holds only the names the server answered with, which Pi records
+    # only when they differ from what was requested.
+    requested_models: tuple[str, ...] | None
+    served_models: tuple[str, ...] | None
+    # This run's own largest one-turn context, from its transcript.
+    peak_turn_prompt_tokens: int | None
+    # Server-side columns, filled by the metrics join: `not_queried` and nulls until
+    # `run-table --metrics-url` has run.
+    server_status: str = "not_queried"
+    server_model_id: str | None = None
+    server_model_source: str | None = None
+    server_token_match: str | None = None
+    server_prompt_tokens: int | None = None
+    server_predicted_tokens: int | None = None
+    server_prefill_tps: float | None = None
+    server_decode_tps: float | None = None
+    server_deferred_max: int | None = None
+    # The largest context since the model loaded, not this run's own: the server
+    # counter is a high-water mark and may come from an earlier run on the same
+    # loaded model. A run's own peak context is `peak_turn_prompt_tokens`.
+    server_ctx_high_water: int | None = None
+    server_cold_start: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -152,4 +175,7 @@ def build_row(
         assistant_turns=usage.assistant_turns if usage else None,
         compactions=state.compactions if state else None,
         retries=state.retries if state else None,
+        requested_models=usage.requested_models if usage else None,
+        served_models=usage.served_models if usage else None,
+        peak_turn_prompt_tokens=usage.peak_turn_prompt_tokens if usage else None,
     )

@@ -52,6 +52,21 @@ EXPECTED_COLUMNS = [
     "assistant_turns",
     "compactions",
     "retries",
+    # Spec 0005: appended after 0001's columns, which stay an unchanged prefix.
+    "requested_models",
+    "served_models",
+    "peak_turn_prompt_tokens",
+    "server_status",
+    "server_model_id",
+    "server_model_source",
+    "server_token_match",
+    "server_prompt_tokens",
+    "server_predicted_tokens",
+    "server_prefill_tps",
+    "server_decode_tps",
+    "server_deferred_max",
+    "server_ctx_high_water",
+    "server_cold_start",
 ]
 
 INTEGER_COLUMNS = [
@@ -64,6 +79,11 @@ INTEGER_COLUMNS = [
     "assistant_turns",
     "compactions",
     "retries",
+    "peak_turn_prompt_tokens",
+    "server_prompt_tokens",
+    "server_predicted_tokens",
+    "server_deferred_max",
+    "server_ctx_high_water",
 ]
 
 
@@ -109,6 +129,20 @@ def sample_row(run_id: str = "run-a", **overrides: object) -> RunRow:
         "assistant_turns": 2,
         "compactions": 2,
         "retries": 1,
+        "requested_models": ["local-qwen38-27b"],
+        "served_models": ["qwen3.8-27b-ud-q8_k_xl"],
+        "peak_turn_prompt_tokens": 1260,
+        "server_status": "joined",
+        "server_model_id": "qwen3.8-27b-ud-q8_k_xl",
+        "server_model_source": "served",
+        "server_token_match": "exact",
+        "server_prompt_tokens": 1200,
+        "server_predicted_tokens": 120,
+        "server_prefill_tps": 250.5,
+        "server_decode_tps": 20.25,
+        "server_deferred_max": 0,
+        "server_ctx_high_water": 8192,
+        "server_cold_start": True,
     }
     values.update(overrides)
     return RunRow(**values)
@@ -167,10 +201,29 @@ def test_column_types_are_fixed_by_the_explicit_schema(tmp_path: Path) -> None:
     assert types["qualified"] == "BOOLEAN"
     for name in INTEGER_COLUMNS:
         assert types[name] == "BIGINT", name
-    for name in ("agent_seconds", "wall_seconds"):
+    for name in ("agent_seconds", "wall_seconds", "server_prefill_tps", "server_decode_tps"):
         assert types[name] == "DOUBLE", name
     for name in ("run_id", "ts", "review_ts", "request_params", "gate", "failure_cause"):
         assert types[name] == "VARCHAR", name
+    for name in ("server_status", "server_model_id", "server_model_source", "server_token_match"):
+        assert types[name] == "VARCHAR", name
+    assert types["requested_models"] == types["served_models"] == "VARCHAR[]"
+    assert types["server_cold_start"] == "BOOLEAN"
+
+
+def test_server_and_transcript_columns_round_trip(tmp_path: Path) -> None:
+    out = tmp_path / "run_table.parquet"
+
+    write_run_table([sample_row("run-a")], out)
+
+    _, _, (record,) = _read(out)
+    assert record["requested_models"] == ["local-qwen38-27b"]
+    assert record["served_models"] == ["qwen3.8-27b-ud-q8_k_xl"]
+    assert record["peak_turn_prompt_tokens"] == 1260
+    assert record["server_status"] == "joined"
+    assert record["server_prompt_tokens"] == 1200
+    assert record["server_prefill_tps"] == 250.5
+    assert record["server_cold_start"] is True
 
 
 def test_all_null_columns_keep_their_types(tmp_path: Path) -> None:

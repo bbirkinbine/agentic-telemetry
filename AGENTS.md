@@ -118,7 +118,10 @@ tool swap changes one file.
 
 - Install: `.agentic/toolchain.sh install` (`uv sync`)
 - Run table: `uv run agentic-telemetry run-table --out data/run_table.parquet DIR...`
-  (DIR = project roots or landing-zone copies; `data/` is ignored, never committed)
+  (DIR = project roots or landing-zone copies; `data/` is ignored, never committed).
+  Add `--metrics-url http://127.0.0.1:8428` to join each run to the inference
+  host's metrics in the local stack's VictoriaMetrics (spec 0005, read-only).
+  Rerun after about 90 s for a run that just ended.
 - Session table: `uv run agentic-telemetry session-table --out data/session_table.parquet [DIR...]`
   (no DIR = each client's default session directory; DIR = session directories,
   project roots or landing-zone copies)
@@ -248,7 +251,7 @@ Rules for anything that comes from outside:
 - Research papers are cited, never pasted; private repos and the vault are
   never named as sources in tracked files.
 
-## Open work / current state (updated 2026-10-21)
+## Open work / current state (updated 2026-10-22)
 
 - Bootstrapped 2026-10-21 (full profile). `analysis/` is a design draft.
 - Product spec `docs/specs/0000-product.md` exists. Spec 0001 (run table from
@@ -294,16 +297,26 @@ Rules for anything that comes from outside:
     - an easier install (a one-command script, or Ansible together with 0006);
     - llama-swap issue #1135: if llama-swap's own `/metrics` gains per-model
       data, the agent can be retired.
+- Spec 0005 (server-metrics join) is shipped:
+  - `run-table --metrics-url URL` joins each delegate run to the inference host's
+    per-model series in VictoriaMetrics, through `src/agentic_telemetry/server_metrics/`.
+  - The model comes from the run's own transcript (served, then requested), with
+    no alias table. Inference from moving counters happens only for a run with
+    no recorded names, and only on an exact token match.
+  - Throughput comes from counter increases. Each run's tokens are reconciled
+    against the server's, and it gets a status: joined, joined_approx, overlap,
+    uncovered, no_data or error.
+  - Its implement phase was the first dogfooded handoff (`local-qwen38-flash-next`).
+    That run joined `exact`, and the review verdict `model-defect` demoted the
+    model for `phase:implement`. Delegation is active for this checkout
+    (`policy = auto`).
 - Roadmap unit 3 continues in draft specs:
   - 0004: landing-zone shipping and ledger ingestion. It also revisits two 0001
     defaults: a stale landing-zone copy is a conflict that exits 1, and an
     inbox-era ledger path takes `delegate` as its `project`.
-  - 0005: the server-metrics join, now unblocked by 0007. It needs a mapping
-    from ledger profile alias to llama-swap model ID, and it must reconcile its
-    gauge-mean criteria with the counter advice in its notes.
   - 0006: the VM deployment.
-- Next: 0005 (unblocked) or 0004, or the rest of roadmap unit 2 once the
-  scaffold's Phase 1 lands.
+- Next: 0004 (then 0006), server columns for the session table (a follow-up 0005
+  names), or the rest of roadmap unit 2 once the scaffold's Phase 1 lands.
 
 <!-- agentic-scaffold:standing-rules:start -->
 

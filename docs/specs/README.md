@@ -31,11 +31,11 @@ line; the source of truth is the spec file, this is a rendered cache. Run
 <!-- Generated block — do not edit by hand; the specs-status hook overwrites it. Source of truth is each spec's **Status:** field. -->
 - [0000 — agentic-telemetry](0000-product.md)  (evergreen)
 - [0004 — Landing-Zone Shipping and Ledger Ingestion](0004-landing-shipping.md)  (draft) — depends on 0003
-- [0005 — Server-Metrics Join](0005-server-metrics-join.md)  (draft) — depends on 0003, 0007
 - [0006 — Telemetry VM Deployment](0006-telemetry-vm-deploy.md)  (draft) — depends on 0003, 0004 (blocked)
 - ~~[0001 — Run Table](0001-run-table.md)~~  (shipped)
 - ~~[0002 — Session Table](0002-session-table.md)~~  (shipped)
 - ~~[0003 — Local Collector Stack](0003-local-collector-stack.md)~~  (shipped)
+- ~~[0005 — Server-Metrics Join](0005-server-metrics-join.md)~~  (shipped) — depends on 0003, 0007
 - ~~[0007 — Host-Local Model Metrics Scraper](0007-host-local-model-metrics.md)~~  (shipped) — depends on 0003
 <!-- specs-status:end -->
 

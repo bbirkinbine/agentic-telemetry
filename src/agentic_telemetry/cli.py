@@ -1,17 +1,25 @@
-"""Command line: `agentic-telemetry run-table --out PATH DIR...` and
+"""Command line: `agentic-telemetry run-table --out PATH DIR... [--metrics-url URL]` and
 `agentic-telemetry session-table --out PATH [DIR...]`."""
 
 import argparse
 import os
 import sys
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from agentic_telemetry.run_table.build import build_run_table
 from agentic_telemetry.run_table.dedupe import ConflictingRunError
 from agentic_telemetry.run_table.discovery import NoLedgerError
 from agentic_telemetry.run_table.parquet_writer import write_run_table
 from agentic_telemetry.run_table.summary import render_summary
+from agentic_telemetry.server_metrics.http_fetch import (
+    Fetch,
+    MetricsUnreachableError,
+    urlopen_fetch,
+)
+from agentic_telemetry.server_metrics.join import join_server_metrics
 from agentic_telemetry.session_table.build import build_session_table
 from agentic_telemetry.session_table.discovery import NoTranscriptError
 from agentic_telemetry.session_table.parquet_writer import write_session_table
@@ -24,7 +32,10 @@ RUN_TABLE_DESCRIPTION = (
     "(.agentic/delegate/ledger.jsonl, or a landing-zone copy with a results/ directory) under "
     "each DIR, joined to its review verdict, result.json, state.json and session "
     "transcripts. Inputs are read-only evidence; the only file written is --out, which "
-    "is rebuilt from scratch on every run. Prints a summary of counts and warnings."
+    "is rebuilt from scratch on every run. With --metrics-url, each run is also joined to "
+    "the inference host's per-model server metrics, read read-only from that VictoriaMetrics "
+    "base URL; without it the server_ columns stay null and no request is made. Prints a "
+    "summary of counts and warnings."
 )
 
 SESSION_TABLE_DESCRIPTION = (
@@ -63,6 +74,41 @@ def _parquet_out(value: str) -> Path:
     return path
 
 
+def _metrics_url(value: str) -> str:
+    """Argparse type: a VictoriaMetrics base URL, with any trailing slash removed.
+
+    Args:
+        value: The `--metrics-url` argument.
+
+    Returns:
+        The URL, ready to have an API path appended.
+
+    Raises:
+        argparse.ArgumentTypeError: The value carries credentials, is not an
+            http(s) URL, names no host, has a port that is not a number, or
+            carries a query or fragment.
+            A query would be dropped by the appended parameters anyway.
+    """
+    parts = urlsplit(value)
+    # Credentials first, and never echoed: every later message quotes the value.
+    if parts.username or parts.password:
+        raise argparse.ArgumentTypeError("--metrics-url must not carry credentials")
+    if parts.scheme not in ("http", "https"):
+        raise argparse.ArgumentTypeError(
+            f"--metrics-url must start with http:// or https://, got: {value}"
+        )
+    if not parts.hostname:
+        raise argparse.ArgumentTypeError(f"--metrics-url names no host: {value}")
+    try:
+        _ = parts.port  # reading the port is the check: a non-numeric one raises
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(f"--metrics-url has an unusable port: {value}") from error
+    if parts.query or parts.fragment:
+        # Not echoed: a query string may carry a token.
+        raise argparse.ArgumentTypeError("--metrics-url must carry no query or fragment")
+    return value.rstrip("/")
+
+
 def _parser() -> argparse.ArgumentParser:
     """Return the top-level parser with its subcommands."""
     parser = argparse.ArgumentParser(
@@ -81,6 +127,13 @@ def _parser() -> argparse.ArgumentParser:
         type=_parquet_out,
         metavar="PATH",
         help="Parquet file to write, e.g. data/run_table.parquet (parent must exist)",
+    )
+    run_table.add_argument(
+        "--metrics-url",
+        type=_metrics_url,
+        metavar="URL",
+        help="VictoriaMetrics base URL to read the inference host's per-model metrics from "
+        "(read-only), e.g. http://127.0.0.1:8428; omit it to leave the server_ columns null",
     )
     run_table.add_argument(
         "dirs",
@@ -111,13 +164,39 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _run_table(dirs: Sequence[Path], out: Path) -> int:
-    """Build and write the run table; return the process exit code."""
+def _run_table(dirs: Sequence[Path], out: Path, metrics_url: str | None, fetch: Fetch) -> int:
+    """Build the run table, join the server metrics when asked, and write it.
+
+    Args:
+        dirs: The evidence directories.
+        out: The Parquet file to write.
+        metrics_url: The VictoriaMetrics base URL, or None to leave the server
+            columns null and make no request.
+        fetch: The HTTP seam.
+
+    Returns:
+        The process exit code: 0 on success, 1 when the evidence cannot be built
+        or the metrics URL cannot be read. Nothing is written on a failure.
+    """
     try:
         rows, summary = build_run_table(dirs)
     except (NoLedgerError, ConflictingRunError) as error:
         print(f"agentic-telemetry run-table: error: {error}", file=sys.stderr)
         return 1
+    if metrics_url is not None:
+        try:
+            rows, report = join_server_metrics(rows, metrics_url, fetch, datetime.now(UTC))
+        except MetricsUnreachableError as error:
+            print(
+                f"agentic-telemetry run-table: error: --metrics-url {metrics_url} "
+                f"could not be read: {error}",
+                file=sys.stderr,
+            )
+            return 1
+        summary.warnings.extend(report.warnings)
+        summary.server_queried = True
+        summary.server_status_counts = report.status_counts
+        summary.server_source_counts = report.source_counts
     write_run_table(rows, out)
     print(render_summary(summary))
     print(f"wrote {len(rows)} rows to {out}")
@@ -164,7 +243,7 @@ def _session_table(dirs: Sequence[Path], out: Path) -> int:
     return 0
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(argv: Sequence[str] | None = None, fetch: Fetch | None = None) -> int:
     """Run the command line and return its exit code.
 
     Exit codes: 0 on success (warnings included), 1 when the inputs cannot be
@@ -172,13 +251,17 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     Args:
         argv: Arguments without the program name; defaults to `sys.argv[1:]`.
+        fetch: The HTTP seam for `--metrics-url`; defaults to the stdlib GET.
+            Tests pass a stub, so no test needs a listening port.
     """
     parser = _parser()
     args = parser.parse_args(argv)
+    fetcher: Fetch = fetch if fetch is not None else urlopen_fetch
     dirs: list[Path] = getattr(args, "dirs", [])
     out: Path | None = getattr(args, "out", None)
+    metrics_url: str | None = getattr(args, "metrics_url", None)
     if args.command == "run-table" and out is not None:
-        return _run_table(dirs, out)
+        return _run_table(dirs, out, metrics_url, fetcher)
     if args.command == "session-table" and out is not None:
         return _session_table(dirs, out)
     parser.print_help(sys.stderr)
