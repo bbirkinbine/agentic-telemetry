@@ -79,6 +79,13 @@ scraping, holds the archive, and is backed up.
   The orchestrator prepares commands and checks results. Repo changes are
   limited to `collector/README.md`, and a launchd plist template with placeholder
   paths if one is tracked. <!-- assumption: a tracked plist template under collector/mac-agent/ with placeholders -->
+- **To settle at clarify (handed over by 0004, D7):**
+  - Loki refuses lines older than a week (`reject_old_samples_max_age: 1w`, the
+    3.7.9 default), so on a fresh VM the ship script's backfill of older ledger
+    lines reaches only the archive. Widen the window in `loki-config.yaml`, or
+    accept archive-only backfill.
+  - An easier install for the inference-host agent (0007): one command or an
+    Ansible role, rather than copying four files by hand.
 - If 0005 ships before this spec, its manual check runs against the Mac stack
   and is repeated here.
 - **Open question: one bind address, two networks** (from the 0003 review).

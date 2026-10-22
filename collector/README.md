@@ -22,9 +22,9 @@ process that knows where data goes.
  Codex CLI  ────────────────────────┤                ┌──>│ :8428            │
  your Python apps (OTel SDK) ───────┤                │   └──────────────────┘
                                     │                │   ┌──────────────────┐
- ledger.jsonl / session JSONL       ▼                ├──>│ Loki :3100       │ logs, 2y
- (rsync from Macs) ──> landing/ ──> OTel Collector ────┤   └──────────────────┘
-                       (filelog)   (one process)     │   ┌──────────────────┐
+ ledgers (rsync from Macs)          ▼                ├──>│ Loki :3100       │ logs, 2y
+ ──> landing/ ────────────────────> OTel Collector ────┤   └──────────────────┘
+     (filelog: ledgers only)       (one process)     │   ┌──────────────────┐
  llama-swap gateway /metrics    ──> (prometheus     ├──>│ Tempo :3200      │ traces, 90d (optional)
                                      receiver)       │   └──────────────────┘
                                                      │   ┌──────────────────┐
@@ -411,17 +411,20 @@ archive into the new store.
 |---|---|---|---|
 | Claude Code | OTLP/HTTP to `:4318` | metrics (`claude_code.cost.usage`, `token.usage`, `lines_of_code.count`, `commit.count`, `session.count`, `active_time.total`), log events (`claude_code.tool_result`, `tool_decision`, `api_request`, ...), traces (beta) | `clients/claude-code-user-settings.json` merged into `~/.claude/settings.json`. Must be user-level; a repo's `.claude/settings.json` cannot turn export on |
 | Codex CLI | OTLP/HTTP to `:4318` | log events (`codex.tool_decision`, `codex.tool_result`, ...) | `[otel]` table in `~/.codex/config.toml` with an `otlp-http` exporter. Exact sub-table syntax still unverified; see the vault plan |
-| Pi (interactive) | none live | ledger + session JSONL | arrives via the landing zone |
-| Delegate runner | none live | `ledger.jsonl`, `results/<run>/result.json`, session JSONL | arrives via the landing zone |
-| Scaffold tool-call ledger (Phase 1, all clients) | landing zone | one JSON line per tool call | `scripts/ship-ledgers.sh` (to write) rsyncs `.agentic/telemetry/*.jsonl` and `.agentic/delegate/` from each project to `landing/<host>/<project>/` |
+| Pi, Claude Code and Codex transcripts | landing zone, batch only | session JSONL (Codex also `.jsonl.zst`) | `mac-agent/ship-ledgers.sh` copies them to `landing/<host>/_sessions/{pi,claude-code,codex}/`; `session-table` reads them there. Never tailed (spec 0004) |
+| Delegate runner | landing zone | `ledger.jsonl` (tailed); `results/<run>/{result.json,state.json,session/*.jsonl}` (batch) | `mac-agent/ship-ledgers.sh` copies these, and nothing else, to `landing/<host>/<project>/.agentic/delegate/`; `run-table` reads them there |
+| Scaffold tool-call ledger (Phase 1, all clients) | landing zone | one JSON line per tool call | `mac-agent/ship-ledgers.sh` copies `.agentic/telemetry/*.jsonl` to `landing/<host>/<project>/.agentic/telemetry/`, where the Collector tails it |
 | llama-swap gateway | Collector scrapes the gateway's own `/metrics` | system and GPU metrics | `performance.disabled: false` in the llama-swap config. Never scrape `/upstream/…` through it (see *Inference server endpoints*) |
 | llama.cpp-style servers behind llama-swap | the inference host agent scrapes each server's own port and sends OTLP to `:4318` (spec 0007) | `llamacpp:*` prompt/predicted token counters, tokens/s, `requests_deferred`, `n_tokens_max` where the build has it | each server's Prometheus route on (llama.cpp: `--metrics`), and a line per model in the agent's `targets.json`. Per-request lines from llama-swap `/logs/stream/http` are not captured yet |
 | Your own Python agents | OTLP from the OTel SDK | GenAI spans + metrics | `OTEL_EXPORTER_OTLP_ENDPOINT=http://telemetry.example:4318` |
-| Anything else | drop JSONL in `landing/<source>/` | logs | the `filelog` receiver tails it; each line becomes one log record with `source` from the path |
 
-The landing zone is the escape hatch that makes this "irregardless of source": a cron job on
-any machine can rsync files there, and the Collector turns them into log records
-with a checkpoint so nothing is ingested twice.
+The landing zone is where file-only sources meet: a job on any machine can rsync
+files there. The Collector tails only the ledgers, `landing/*/*/.agentic/delegate/ledger.jsonl`
+and `landing/*/*/.agentic/telemetry/*.jsonl`, with a checkpoint so nothing is
+ingested twice. Transcripts carry captured tool content, so they stay files that
+`run-table` and `session-table` read in batch rather than records in Loki (spec 0004).
+A new source that only writes JSONL either matches those ledger paths or needs a
+receiver change.
 
 ## Flow of records, including offline
 
@@ -430,8 +433,8 @@ Two paths. Both end in the same archive and the same stores.
 | | Live path (OTLP) | Batch path (files) |
 |---|---|---|
 | Carries | Claude Code metrics and events, Codex events, your apps' spans | tool-call ledgers, delegate results, session transcripts |
-| Mac side | `mac-agent/otel-agent.yaml`: a Collector on `localhost:4318` with a disk-backed queue and a local JSONL copy | `mac-agent/ship-ledgers.sh` every 15 min from launchd: rsync over SSH (LAN or Tailscale) into `landing/<host>/` |
-| Offline | the queue fills on disk and drains when the VM is reachable; the local copy is written regardless | the script exits quietly; the next run catches up. Files never change after a session ends, so nothing is lost |
+| Mac side | `mac-agent/otel-agent.yaml`: a Collector on `localhost:4318` with a disk-backed queue and a local JSONL copy | `mac-agent/ship-ledgers.sh` (every 15 min from launchd, from 0006): rsync over SSH (LAN or Tailscale) into `landing/<host>/`, or `--dest DIR` into a local landing zone |
+| Offline | the queue fills on disk and drains when the VM is reachable; the local copy is written regardless | the script prints one line and exits 0 (1 if discovery found a name collision or a symlinked `.agentic`); the next run catches up. Files never change after a session ends, so nothing is lost |
 | Authoritative? | best effort: the queue has a cap and the clients drop on their own if no agent is listening | yes: the ledger and transcript files are the record of truth |
 
 Rule: **clients point at localhost, never at the VM.** The Mac agent is the only
@@ -444,8 +447,16 @@ Timeline for one session:
    appends to `.agentic/telemetry/<session>.jsonl`. Both are local writes.
 2. Within minutes, when the VM is reachable: the agent drains its queue; the ship
    script rsyncs new ledger lines and transcripts into the landing zone.
-3. On the VM, continuously: the Collector tails the landing zone and writes every record to
-   the archive, VictoriaMetrics and Loki; the filelog checkpoint prevents re-ingest.
+3. On the VM, continuously: the Collector tails the landing zone's ledgers and writes
+   every line to the archive and Loki, timestamped with the line's own `ts`; the
+   filelog checkpoint prevents re-ingest. Each project is its own Loki stream
+   (`landing_host` and `landing_project` are index labels), because Loki refuses
+   a line far behind the newest one in its stream. A project's ledger files
+   share that stream, so once Phase 1 writes one `telemetry/<session>.jsonl` per
+   session, a backfill or an outage of more than an hour can still refuse an
+   older session's lines; revisit the labels then (0004, D8). Loki also refuses lines older
+   than a week (`reject_old_samples_max_age: 1w`, its default in 3.7.9), so a
+   first backfill of older ledger lines reaches only the archive (0004, D1, D4).
 4. Nightly: the analysis package rebuilds the run table and matrices from the archive
    and landing zone into Parquet.
 
@@ -457,7 +468,7 @@ Timeline for one session:
 | VictoriaMetrics | 5 years | `-retentionPeriod` flag |
 | Loki | 2 years | `limits_config.retention_period` + compactor |
 | Tempo | 90 days | `compactor.compaction.block_retention` |
-| Landing-zone files | until processed + 30 days | the ship script deletes after the Collector checkpoint passes |
+| Landing-zone files | forever, for now | plan: until processed + 30 days. Nothing deletes landing files yet, and the ship script never passes `--delete` (spec 0004) |
 
 Derived stats (per-session and per-run summary rows, the per-model failure matrix)
 are computed by the Python package in this repo from the archive and the landing zone, and
@@ -476,7 +487,9 @@ look at in a year; the raw records are what you go back to when a number looks w
 4. Send a synthetic span with `telemetrygen` or point one Claude Code session at it with the client snippet; confirm a file appears under `archive/` and the metric shows in VictoriaMetrics' `/api/v1/query`.
 5. Add the three Grafana data sources on the monitoring VM.
 6. Add the VM and ports to `ENDPOINTS.md` in the vault.
-7. Write `scripts/ship-ledgers.sh` and schedule it on each Mac.
+7. Run `mac-agent/ship-ledgers.sh` on each Mac (`--help` lists its options;
+   set `PROJECTS_ROOT` to where your projects live), then schedule it under
+   launchd (0006).
 
 ## Verification
 
@@ -624,6 +637,34 @@ Validated today with the pinned images, on the Mac, via Docker:
     - On the stack: the agent's `up` for that model dropped to 0 on the first
       scrape after the unload, and stayed 0 for all 62 scrapes of the next 31
       minutes. Its `llamacpp_*` series ended at the unload.
+
+- Landing-zone shipping, spec 0004, on the Mac, 2026-10-22:
+  - `otel-collector.yaml` (ledger-only `include`, `gotime` timestamp, host and
+    project parsed into resource attributes) passes `otelcol-contrib validate` on
+    the `linux/arm64` and `linux/amd64` entries of the 0.163.1 index (amd64 by its
+    manifest digest, under emulation). The live Collector runs it.
+  - **rsync.** The allowlist ships the same files under macOS openrsync
+    (`/usr/bin/rsync`, with `/bin/bash` 3.2) and GNU rsync 3.2.7 (bash 5.2, in a
+    Debian container). Neither copies a planted `pi-agent/auth.json`,
+    `npm-cache/`, `segments/`, log, prompt or client credential file. After the
+    review, the copy is `rsync -rpt` (no `-l`): both implementations skip a
+    symlinked `result.json`, transcript or run directory, name it on stderr, exit
+    0 and ship no target content.
+  - **Timestamps.** A scratch Collector on the pinned image parsed ledger lines
+    ending `:56Z`, `:56.123Z` and `+00:00` with their own `ts`, and did not read a
+    `_sessions/` transcript.
+  - **Same rows.** `ship-ledgers.sh --dest` into the local landing zone, then
+    `run-table` and `session-table` on `landing/<host>/`: the same rows as from the
+    project roots and client session directories (16 runs; 660 sessions), with the
+    same `project` values. Counts only; the spec holds the breakdown.
+  - **Loki streams.** With host and project as log attributes, every ledger
+    shared one Loki stream, and Loki refused 23 of 28 backfilled lines as "entry
+    too far behind" (the archive kept all 28). Parsed into resource attributes,
+    they are index labels and each project is its own stream: a scratch Loki on
+    `loki-config.yaml` then kept all 8 lines younger than a week and refused the
+    20 older ones as "timestamp too old" (`reject_old_samples_max_age: 1w`, the 3.7.9
+    default). A line with an old timestamp is only queryable after Loki flushes
+    it to storage (`query_ingesters_within: 3h`).
 
 Not yet done:
 - the VM deployment (spec 0006);

@@ -115,7 +115,8 @@ git restore <manifest> <lockfile>   # pyproject.toml + uv.lock, or package.json 
 
 **Out-of-repo side effects:** the Mac agent writes under
 `~/.local/state/otel-agent/` (queue and local archive); the ship script writes
-to the VM's `landing/`; the VM's Collector writes `archive/` and the three stores
+to the VM's `landing/` (or, with `--dest`, a local landing zone such as the Mac
+stack's); the VM's Collector writes `archive/` and the three stores
 under `/srv/telemetry/`. Since spec 0003 the same stack also runs on the Mac. It
 writes `archive/` and the three stores under the Mac's `TELEMETRY_ROOT` (from
 `collector/.env`). `docker compose down` keeps them. Never delete that archive to

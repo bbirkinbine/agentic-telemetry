@@ -5,6 +5,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
+from agentic_telemetry.run_table.dedupe import ReviewMultiset
 from agentic_telemetry.run_table.discovery import DiscoveredLedger
 from agentic_telemetry.run_table.failure_phase import delegated_phase, first_failure
 from agentic_telemetry.run_table.json_values import JsonObject, opt_str
@@ -28,6 +29,9 @@ class LedgerResult:
     orphans: list[str] = field(default_factory=list)
     unknown_type_counts: Counter[str] = field(default_factory=Counter)
     warnings: list[str] = field(default_factory=list)
+    # Every review of each run as `(ts, verdict)` pairs, so a stale landing-zone
+    # copy can be told from a conflicting one (spec 0004). Unreviewed runs are absent.
+    review_keys: dict[str, ReviewMultiset] = field(default_factory=dict)
 
 
 def assemble_ledger(discovered: DiscoveredLedger) -> LedgerResult:
@@ -56,6 +60,8 @@ def assemble_ledger(discovered: DiscoveredLedger) -> LedgerResult:
     records = _run_records(contents.runs, results, result.warnings)
     run_ids = {opt_str(record.get("run")) or "" for record in records}
     reviews = _latest_reviews(contents.reviews, result.warnings)
+    for review in contents.reviews:
+        result.review_keys.setdefault(review.run_id, Counter())[(review.ts, review.verdict)] += 1
     for review_run_id, (review, _) in reviews.items():
         if review_run_id not in run_ids:
             result.warnings.append(
