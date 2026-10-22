@@ -11,6 +11,8 @@ from run_table_builders import PLACEHOLDER_ENDPOINT
 from agentic_telemetry.run_table.parquet_writer import RUN_TABLE_SCHEMA, write_run_table
 from agentic_telemetry.run_table.row import RunRow
 
+SUBAGENT_COLUMNS = ("subagent_runs", "subagent_turns", "subagent_models")
+
 EXPECTED_COLUMNS = [
     "run_id",
     "project",
@@ -56,6 +58,8 @@ EXPECTED_COLUMNS = [
     "requested_models",
     "served_models",
     "peak_turn_prompt_tokens",
+    # Spec 0009: after the transcript columns, before the server columns.
+    *SUBAGENT_COLUMNS,
     "server_status",
     "server_model_id",
     "server_model_source",
@@ -80,6 +84,8 @@ INTEGER_COLUMNS = [
     "compactions",
     "retries",
     "peak_turn_prompt_tokens",
+    "subagent_runs",
+    "subagent_turns",
     "server_prompt_tokens",
     "server_predicted_tokens",
     "server_deferred_max",
@@ -132,6 +138,9 @@ def sample_row(run_id: str = "run-a", **overrides: object) -> RunRow:
         "requested_models": ["local-qwen38-27b"],
         "served_models": ["qwen3.8-27b-ud-q8_k_xl"],
         "peak_turn_prompt_tokens": 1260,
+        "subagent_runs": 3,
+        "subagent_turns": 17,
+        "subagent_models": ["local-helper-coder"],
         "server_status": "joined",
         "server_model_id": "qwen3.8-27b-ud-q8_k_xl",
         "server_model_source": "served",
@@ -208,6 +217,7 @@ def test_column_types_are_fixed_by_the_explicit_schema(tmp_path: Path) -> None:
     for name in ("server_status", "server_model_id", "server_model_source", "server_token_match"):
         assert types[name] == "VARCHAR", name
     assert types["requested_models"] == types["served_models"] == "VARCHAR[]"
+    assert types["subagent_models"] == "VARCHAR[]"
     assert types["server_cold_start"] == "BOOLEAN"
 
 
@@ -220,6 +230,7 @@ def test_server_and_transcript_columns_round_trip(tmp_path: Path) -> None:
     assert record["requested_models"] == ["local-qwen38-27b"]
     assert record["served_models"] == ["qwen3.8-27b-ud-q8_k_xl"]
     assert record["peak_turn_prompt_tokens"] == 1260
+    assert [record[name] for name in SUBAGENT_COLUMNS] == [3, 17, ["local-helper-coder"]]
     assert record["server_status"] == "joined"
     assert record["server_prompt_tokens"] == 1200
     assert record["server_prefill_tps"] == 250.5
@@ -239,6 +250,9 @@ def test_all_null_columns_keep_their_types(tmp_path: Path) -> None:
         retries=None,
         review_verdict=None,
         review_ts=None,
+        subagent_runs=None,
+        subagent_turns=None,
+        subagent_models=None,
     )
 
     write_run_table([row], out)
@@ -246,6 +260,8 @@ def test_all_null_columns_keep_their_types(tmp_path: Path) -> None:
     _, types, (record,) = _read(out)
     assert record["tokens_in"] is None
     assert types["tokens_in"] == "BIGINT"
+    assert [record[name] for name in SUBAGENT_COLUMNS] == [None, None, None]
+    assert types["subagent_runs"] == types["subagent_turns"] == "BIGINT"
     assert types["retries"] == "BIGINT"
     assert types["review_ts"] == "VARCHAR"
 

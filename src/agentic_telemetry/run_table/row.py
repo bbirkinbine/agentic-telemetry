@@ -73,6 +73,15 @@ class RunRow:
     served_models: tuple[str, ...] | None
     # This run's own largest one-turn context, from its transcript.
     peak_turn_prompt_tokens: int | None
+    # Pi subagents the run started (spec 0009): child runs, their turns and model
+    # names, from the `subagent` tool results whose usage the token columns already
+    # include (all but `tokens_reasoning`: Pi reports no reasoning there). Null with
+    # no transcript; `subagent_turns` is also null when a usage-bearing call has no
+    # integer `totalChildUsage.turns`. The child names stay out of
+    # `requested_models`, so the join resolves the parent's.
+    subagent_runs: int | None
+    subagent_turns: int | None
+    subagent_models: tuple[str, ...] | None
     # Server-side columns, filled by the metrics join: `not_queried` and nulls until
     # `run-table --metrics-url` has run.
     server_status: str = "not_queried"
@@ -178,4 +187,7 @@ def build_row(
         requested_models=usage.requested_models if usage else None,
         served_models=usage.served_models if usage else None,
         peak_turn_prompt_tokens=usage.peak_turn_prompt_tokens if usage else None,
+        subagent_runs=usage.subagent_runs if usage else None,
+        subagent_turns=usage.subagent_turns if usage else None,
+        subagent_models=usage.subagent_models if usage else None,
     )

@@ -121,11 +121,12 @@ def assistant_message(
     message_id: str = "m-assistant",
     model: str | None = None,
     response_model: str | None = None,
+    provider: str | None = None,
 ) -> JsonObject:
     """Return one Pi transcript line for an assistant message carrying `usage`.
 
-    `model` and `response_model` become the message's `model` and `responseModel`
-    keys; each key is left out when its argument is None.
+    `model`, `response_model` and `provider` become the message's `model`,
+    `responseModel` and `provider` keys; each key is left out when its argument is None.
     """
     message: JsonObject = {
         "role": "assistant",
@@ -143,6 +144,8 @@ def assistant_message(
         message["model"] = model
     if response_model is not None:
         message["responseModel"] = response_model
+    if provider is not None:
+        message["provider"] = provider
     return {
         "type": "message",
         "id": message_id,
