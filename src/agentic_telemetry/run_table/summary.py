@@ -19,6 +19,11 @@ class Summary:
     orphans: list[str] = field(default_factory=list)
     unknown_type_counts: Counter[str] = field(default_factory=Counter)
     warnings: list[str] = field(default_factory=list)
+    # Filled by the metrics join (spec 0005). Both counters hold the full
+    # vocabulary with zeros, so a reader can see which statuses did not occur.
+    server_queried: bool = False
+    server_status_counts: Counter[str] = field(default_factory=Counter)
+    server_source_counts: Counter[str] = field(default_factory=Counter)
 
     @property
     def rows_written(self) -> int:
@@ -43,6 +48,15 @@ def render_summary(summary: Summary) -> str:
             for row_type, count in sorted(summary.unknown_type_counts.items())
         )
         lines.append(f"skipped ledger row types: {counted}")
+    if summary.server_queried:
+        lines.extend(
+            f"server_status {status}: {summary.server_status_counts[status]}"
+            for status in summary.server_status_counts
+        )
+        lines.extend(
+            f"server_model_source {source}: {summary.server_source_counts[source]}"
+            for source in summary.server_source_counts
+        )
     lines.append(f"warnings: {len(summary.warnings)}")
     lines.extend(f"  - {warning}" for warning in summary.warnings)
     return "\n".join(lines)

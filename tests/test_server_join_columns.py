@@ -6,9 +6,11 @@ import dataclasses
 
 import pytest
 from server_join_helpers import (
+    ALIAS_MAYA,
     ALIAS_QWEN,
     BASE_URL,
     FLASH,
+    GLM,
     KNOWN,
     NOW,
     QWEN,
@@ -123,11 +125,14 @@ def test_build_without_deferred_metric_gives_null_deferred_and_unchanged_status(
         pytest.param(None, 1.0, True, id="absent-at-start-then-up"),
         pytest.param(0.0, 1.0, True, id="down-at-start-then-up"),
         pytest.param(1.0, 1.0, False, id="already-up"),
+        pytest.param(0.0, 0.0, False, id="down-throughout"),
+        pytest.param(None, None, None, id="no-up-sample-is-unknown"),
     ],
 )
 def test_cold_start_is_up_absent_or_zero_at_start_and_one_later(
-    up_at_start: float | None, up_later: float, expected: bool
+    up_at_start: float | None, up_later: float | None, expected: bool | None
 ) -> None:
+    """D8: `up` later is read through the widened end; no `up` sample at all is null."""
     readings = model_readings(up_at_start=up_at_start, up_later=up_later)
     fake = FakeVictoria(known=KNOWN, readings=readings)
 
@@ -160,20 +165,43 @@ def test_cold_start_is_null_when_the_run_did_not_join(
     assert row.server_cold_start is None
 
 
-def test_unknown_alias_resolves_by_the_one_model_whose_counters_moved() -> None:
+def test_run_without_transcript_names_is_inferred_from_the_one_model_that_moved() -> None:
+    """D8: rule 3 applies only when the transcript recorded no model names."""
     fake = FakeVictoria(known=KNOWN, readings=model_readings(FLASH))
 
-    row = join_one(fake, requested_models=(ALIAS_QWEN,), served_models=(), model_id=ALIAS_QWEN)
+    row = join_one(fake, requested_models=(), served_models=(), model_id=ALIAS_QWEN)
 
     assert (row.server_model_id, row.server_model_source) == (FLASH, "inferred")
     assert row.server_status == "joined"
+    assert [row.server_token_match] == ["exact"]
+
+
+def test_inferred_model_is_kept_only_when_tokens_reconcile_exactly() -> None:
+    """D8: a neighbour's moving counters must not pin an uncovered run to its model."""
+    fake = FakeVictoria(known=KNOWN, readings=model_readings(FLASH, prompt=40.0, predicted=5.0))
+
+    row = join_one(fake, requested_models=(), served_models=(), model_id=ALIAS_QWEN)
+
+    assert (row.server_model_id, row.server_model_source) == (None, "none")
+    assert row.server_status == "uncovered"
+    assert row.server_prompt_tokens is None
+
+
+def test_uncovered_names_are_not_inferred_onto_a_moving_neighbour() -> None:
+    """D8: a run on a build without metrics (its names unknown) next to a moving Qwen."""
+    fake = FakeVictoria(known=(QWEN, FLASH), readings=model_readings(QWEN))
+
+    row = join_one(fake, requested_models=(ALIAS_MAYA,), served_models=(GLM,), model_id=ALIAS_MAYA)
+
+    assert (row.server_model_id, row.server_model_source) == (None, "none")
+    assert row.server_status == "uncovered"
 
 
 def test_two_models_moving_with_no_known_name_is_uncovered() -> None:
     readings = merge_readings(model_readings(QWEN), model_readings(FLASH))
     fake = FakeVictoria(known=KNOWN, readings=readings)
 
-    row = join_one(fake, requested_models=(ALIAS_QWEN,), served_models=(), model_id=ALIAS_QWEN)
+    row = join_one(fake, requested_models=(), served_models=(), model_id=ALIAS_QWEN)
 
     assert (row.server_model_id, row.server_model_source) == (None, "none")
     assert row.server_status == "uncovered"
@@ -187,14 +215,15 @@ def test_echoed_alias_falls_to_the_ledger_model_id() -> None:
     assert (row.server_model_id, row.server_model_source) == (QWEN, "requested")
 
 
-def test_echoed_alias_with_an_alias_in_the_ledger_falls_to_inferred() -> None:
+def test_echoed_alias_with_an_alias_in_the_ledger_is_uncovered() -> None:
+    """D8: the echoed alias is a recorded name, so rule 3 does not apply."""
     fake = FakeVictoria(known=KNOWN, readings=model_readings(QWEN))
 
     row = join_one(
         fake, requested_models=(ALIAS_QWEN,), served_models=(ALIAS_QWEN,), model_id=ALIAS_QWEN
     )
 
-    assert (row.server_model_id, row.server_model_source) == (QWEN, "inferred")
+    assert (row.server_model_id, row.server_model_source) == (None, "none")
 
 
 def test_join_changes_only_server_columns() -> None:

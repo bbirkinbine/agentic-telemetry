@@ -144,6 +144,9 @@ def test_metrics_url_reads_known_models_once_and_strips_a_trailing_slash(
         pytest.param("http://telemetry.example:notaport", id="bad-port"),
         pytest.param("http://telemetry.example:8428/?nocache=1", id="query"),
         pytest.param("http://telemetry.example:8428#top", id="fragment"),
+        pytest.param("http://user:secret@telemetry.example:8428", id="credentials"),
+        pytest.param("ftp://user:secret@telemetry.example:8428", id="ftp-credentials"),
+        pytest.param("http://telemetry.example:8428/?token=secret", id="query-secret"),
     ],
 )
 def test_malformed_metrics_url_is_a_usage_error_before_any_request(
@@ -157,6 +160,7 @@ def test_malformed_metrics_url_is_a_usage_error_before_any_request(
     assert code == 2
     assert "--metrics-url" in err
     assert "unrecognized arguments" not in err
+    assert "secret" not in err
     assert fake.urls == []
     assert not out.exists()
 

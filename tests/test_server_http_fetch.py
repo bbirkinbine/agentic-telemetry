@@ -101,7 +101,7 @@ def test_http_error_status_raises_a_metrics_error_naming_the_path_not_the_host(
 ) -> None:
     loopback.reply = (500, b"synthetic server failure")
 
-    with pytest.raises((MetricsQueryError, MetricsUnreachableError)) as raised:
+    with pytest.raises(MetricsQueryError) as raised:
         urlopen_fetch(f"{loopback.base}/api/v1/query?query=up")
 
     message = str(raised.value)
@@ -113,5 +113,29 @@ def test_non_http_scheme_is_refused_without_reading(tmp_path: Path) -> None:
     local_file = tmp_path / "not-a-metrics-server.json"
     local_file.write_text('{"status":"success","data":[]}', encoding="utf-8")
 
-    with pytest.raises((ValueError, MetricsUnreachableError)):
+    with pytest.raises(MetricsUnreachableError):
         urlopen_fetch(local_file.as_uri())
+
+
+def test_a_port_that_does_not_speak_http_is_unreachable_not_a_traceback() -> None:
+    """`http.client.HTTPException` (here `BadStatusLine`) becomes `MetricsUnreachableError`."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        port: int = listener.getsockname()[1]
+
+        def answer_garbage() -> None:
+            connection, _ = listener.accept()
+            with connection:
+                connection.recv(4096)
+                connection.sendall(b"SSH-2.0-not-http\r\n\r\n")
+
+        thread = threading.Thread(target=answer_garbage, daemon=True)
+        thread.start()
+        with pytest.raises(MetricsUnreachableError) as raised:
+            urlopen_fetch(f"http://127.0.0.1:{port}/api/v1/query?query=up", timeout=5.0)
+        thread.join(timeout=5)
+
+    message = str(raised.value)
+    assert "/api/v1/query" in message
+    assert "127.0.0.1" not in message

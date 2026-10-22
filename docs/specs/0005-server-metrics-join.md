@@ -1,6 +1,6 @@
 # 0005 — Server-Metrics Join
 
-**Status:** shipping
+**Status:** shipped
 **Last updated:** 2026-10-22
 **Depends on:** 0003, 0007
 **Roadmap unit:** 3 (with 0003, 0004, 0006, 0007)
@@ -80,20 +80,25 @@ Only key names, model names, timestamps and counts were inspected, never content
 - **Model resolution.** For each run, `server_model_id` and `server_model_source`
   are set by the first rule that applies:
   1. `served`: exactly one served name is a known `model_id`, and no requested
-     name is a different known `model_id`;
+     name, nor the ledger's `model_id`, is a different known `model_id` (D8);
   2. `requested`: exactly one requested name, or the ledger's `model_id`, is a
      known `model_id`;
-  3. `inferred`: exactly one known `model_id` has a nonzero increase in
-     `llamacpp_prompt_tokens_total` or `llamacpp_tokens_predicted_total` over the
-     run's widened window;
+  3. `inferred`: the transcript recorded no model names, and exactly one known
+     `model_id` has a nonzero increase in `llamacpp_prompt_tokens_total` or
+     `llamacpp_tokens_predicted_total` over the run's lookback. The inference is
+     kept only when the run's tokens reconcile `exact`; otherwise the run is
+     `uncovered` with source `none` (D8);
   4. otherwise, `server_model_id` is null and `server_model_source` is `none`.
 - **Window.**
   - The run's window is `[ts − wall_seconds, ts]`. When `wall_seconds` is absent,
     `agent_seconds` is used instead, and when the run ID carries a start stamp
     that stamp wins.
-  - Counter queries widen the window by one scrape interval (30 s) on each side,
-    so a run shorter than a scrape still spans two samples.
-- **Columns**, filled for the resolved model over the widened window:
+  - Ranged queries look back over the run plus one scrape interval (30 s),
+    evaluated one scrape past the run's end, so the lookback starts at the run's
+    own start. There is no start-side widening (D8): `increase_pure` already
+    takes the last sample before its window as the base, and reaching one
+    scrape further back would count more of a preceding run's tokens.
+- **Columns**, filled for the resolved model over that lookback:
   - `server_prompt_tokens` and `server_predicted_tokens`: the increase of the
     two `_total` counters;
   - `server_prefill_tps`: increase of `llamacpp_prompt_tokens_total` divided by
@@ -108,8 +113,9 @@ Only key names, model names, timestamps and counts were inspected, never content
     It is the largest context since the model loaded, not this run's own; the
     column docstring and the README say so;
   - `server_cold_start`: true when the model's `up` was 0 (or absent) at the
-    run's start and 1 later in the window. It means the run waited for a model
-    load, measured to scrape resolution.
+    run's start and 1 at any point through one scrape past its end. It means the
+    run waited for a model load, measured to scrape resolution. Null when no `up`
+    sample exists after the start at all (D8).
 - **Peak context.** `peak_turn_prompt_tokens` is the largest
   `input + cacheRead + cacheWrite` of any one assistant turn in the run's
   transcripts: the run's own peak context, null when there is no transcript
@@ -144,7 +150,6 @@ Only key names, model names, timestamps and counts were inspected, never content
   - An unreachable `--metrics-url` exits 1 before writing, naming the URL.
   - A malformed URL exits 2.
 - **No new dependency.** Queries use the standard library HTTP client.
-  <!-- assumption: stdlib urllib over adding httpx/requests -->
 - **Tests.**
   - The HTTP layer is stubbed with response-shaped JSON built in `tests/`.
   - Synthetic transcripts cover every resolution rule and every status,
@@ -172,17 +177,29 @@ Only key names, model names, timestamps and counts were inspected, never content
 
 ## Notes
 
-- **`server_ctx_high_water` limits.** The metric is a high-water mark since
-  the server started, so it can come from an earlier run on the same loaded
-  model. A run's own peak context is better read from its transcript: the
-  largest input-token count of one assistant turn. That is a candidate column
-  for the plan to weigh.
-  <!-- assumption: transcript-derived per-run context peak is left to the plan, not required here -->
-- **Prompt caching and token matching.** The one session checked matched
-  exactly. Whether Pi's input tokens and llama.cpp's `prompt_tokens_total`
-  still agree under heavy prefix caching is unverified. `server_less` and
-  `server_more` make any disagreement visible rather than hiding it; the live
-  check records which one happened.
+- **`server_ctx_high_water` limits.** The metric is a high-water mark since the
+  server started, so it can come from an earlier run on the same loaded model.
+  A run's own peak context is `peak_turn_prompt_tokens`, read from its
+  transcript (D2).
+- **Prompt caching and token matching.** Resolved by the live check
+  (2026-10-22): the handoff run had cache-read tokens, and its prompt and output
+  tokens still reconciled `exact` against Strata's counters. So Pi's input
+  count excludes cached prefix tokens, as llama.cpp's processed-prompt counter
+  does. `server_less` and `server_more` still surface any build that differs.
+- **`increase_pure` and series that appear mid-life** (from the adversarial
+  review). If a counter series' first sample is not a true zero, `increase_pure`
+  counts the counter's whole lifetime value. Examples: a target newly added to
+  `targets.json` for a server that was already running, or a gap longer than
+  VictoriaMetrics' previous-sample allowance. The run then shows a huge
+  `server_prompt_tokens` and `overlap`, visible rather than hidden. Add a target
+  while its model is unloaded to avoid it.
+- **Runs less than one scrape apart.** The base sample is the last scrape at
+  or before a run's start, and the end lookback runs one scrape past its end.
+  So two same-model runs less than about 30 s apart (a pipeline's implement
+  then review, for example) each pick up a little of the other's tokens and
+  both read `server_more` and `overlap`. That is inherent to 30 s scrapes and is
+  visible rather than hidden. Read such an `overlap` against the runs' own
+  timing before treating it as concurrent traffic.
 - **Concurrent runs.** One run at a time on the server keeps windows
   unambiguous (`analysis/README.md`). Token reconciliation detects a violation
   even when the other traffic is not in the run table, such as an interactive
@@ -227,6 +244,32 @@ Answered by the owner on 2026-10-22, approving the plan with every recommendatio
   (`policy = "auto"`), showing the profile change. Deactivation is the owner's
   call at any time.
 
+- **D7, test-first lint and commits** (owner, 2026-10-22, "yes to all").
+  - `pyproject.toml` gains `[tool.ruff.lint.isort] known-first-party =
+    ["agentic_telemetry"]`. This is a scope expansion beyond the plan's "no
+    `pyproject.toml` edit". Without it, ruff classed the not-yet-written
+    `server_metrics` imports as third-party (9 × I001), and the pre-commit
+    hook would block the commit.
+  - The owner approved a work-in-progress commit of the spec and tests on this
+    branch (the handoff worktree starts from `HEAD`), and the handoff's
+    temporary commit on `handoff/<run>`.
+- **D8, review adjudication** (owner, 2026-10-22, answering the `[ask-user]`
+  items from `/review` and `/review-adversarial` on the handoff). These supersede
+  the plan where they differ:
+  - **No start-side widening.** Every ranged query looks back `duration + 30 s`,
+    evaluated at `end + 30 s`, instead of the plan's `duration + 60 s`.
+  - **Strict inference.** Rule 3 applies only when the transcript recorded no
+    names, and is kept only on an `exact` token match.
+  - **Cold start.** `up` later is read over the same lookback at `end + 30 s`.
+    `server_cold_start` is null when no `up` sample exists after the start.
+  - **Mid-pass transport failures.** A refused or timed-out connection after the
+    known-models read aborts the whole command (exit 1, nothing written), while
+    an HTTP error status on one query stays that run's `error`. A test pins it.
+  - **Rule 1's guard.** The orchestrator, on both reviewers' finding, also counts
+    the ledger's `model_id` as a contradicting name. It only narrows rule 1.
+  - **Windowless runs.** A run with no usable window stays `no_data` with
+    source `none`: it is never read, so it is not resolved.
+
 ## External references
 
 - **VictoriaMetrics HTTP API and MetricsQL** (VictoriaMetrics, Apache-2.0),
@@ -255,15 +298,6 @@ Answered by the owner on 2026-10-22, approving the plan with every recommendatio
 - **llama.cpp gauge bucket reset**: llama.cpp `tools/server/server-context.cpp`
   at tag `b11552`, as cited in 0007's External references.
 
-- **D7, test-first lint and commits** (owner, 2026-10-22, "yes to all").
-  - `pyproject.toml` gains `[tool.ruff.lint.isort] known-first-party =
-    ["agentic_telemetry"]`. This is a scope expansion beyond the plan's "no
-    `pyproject.toml` edit". Without it, ruff classed the not-yet-written
-    `server_metrics` imports as third-party (9 × I001), and the pre-commit
-    hook would block the commit.
-  - The owner approved a work-in-progress commit of the spec and tests on this
-    branch (the handoff worktree starts from `HEAD`), and the handoff's
-    temporary commit on `handoff/<run>`.
 
 ## Files to touch
 
@@ -549,3 +583,95 @@ Spec: `docs/specs/0005-server-metrics-join.md`
   - summary lines `server_status <s>: N` and `server_model_source <s>: N`, zeros
     included;
   - a malformed URL exits 2 naming `--metrics-url`, with no request made.
+
+### After handoff (implement, 2026-10-22)
+
+- **Ran through the delegate handoff on `local-qwen38-flash-next`** (run
+  `handoff-0005-server-metrics-join-20261022T042448Z-52656`). Per D4, that run
+  is the live check's delegate run. The runner committed the verified result on
+  `handoff/<run>`.
+  - *Corrected by the orchestrator.* The session first wrote that it had not
+    run through a delegate handoff and that nothing was committed. It misread
+    D4 in its own brief.
+- **Gate green** through `.agentic/toolchain.sh`: lint, format-check, typecheck
+  (38 files), 575 tests. No test file was edited. No file outside the spec's
+  `## Files to touch` was changed; the plan's Docs entries (AGENTS.md,
+  README.md, `analysis/README.md`) are the orchestrator's and were left alone.
+- **Files written.** New subpackage `src/agentic_telemetry/server_metrics/`
+  (`http_fetch`, `victoria_client`, `window`, `readings`, `resolve`,
+  `reconcile`, `columns`, `join`; largest file 226 lines), plus the planned
+  edits to `run_table/session_usage.py`, `run_table/row.py`,
+  `run_table/parquet_writer.py`, `run_table/summary.py` and `cli.py` (263
+  lines, against the plan's estimate of 225; under the 300-line rule).
+- **Choices made where the spec left room** (none changes the approved plan):
+  - rule 3's moved-model set is `WindowReadings.moved_models()`, a method on the
+    readings rather than the plan's sketched free function; `resolve_model` still
+    takes it as a plain collection of IDs.
+  - `MetricsQueryError` carries `path` and `detail` separately, so the join's
+    warning reads `run <id>: query failed at /api/v1/query: <detail>` and names
+    the path but never the host. `_without_host` in `http_fetch.py` also strips
+    the netloc, host and port out of transport-error text.
+  - a transport failure (`MetricsUnreachableError`) during a run's own queries
+    stops the whole command, like a failed known-models read: exit 1, nothing
+    written. A per-query `MetricsQueryError` stays per-run and gives that run
+    status `error`. The plan pinned only the known-models case.
+  - a run with no usable window gets `no_data` and resolves no model, so its
+    source is `none`: with no window nothing can be read, and naming a model
+    that nothing could confirm would suggest a join that did not happen.
+  - `columns.unread(status, model_id, source)` fills `not_compared` plus nulls
+    for `uncovered`, `no_data`, `error` and the windowless case, so the plan's
+    "null columns, status unchanged" rule is one function rather than four.
+  - `SessionUsage` accumulation moved into a private mutable `_Tally`: one pass
+    over the transcripts now fills totals, names and the peak turn context. The
+    plan asked only that the assistant message be returned rather than its usage
+    object; the malformed-line warning text is unchanged.
+  - `Summary` gained `server_queried` beside the two counters and renders the
+    `server_` lines only when it is set, so stdout without the flag is what 0001
+    printed.
+  - join warnings are deduplicated in first-seen order, as build.py already does.
+  - `_metrics_url` checks scheme, then host, then port, then query and fragment,
+    and strips any trailing `/`.
+- **Left for the orchestrator:** the plan's Docs edits, the live check, then
+  `shipped` and the dashboard. No test looked wrong to implement against.
+
+
+### Implement, review and live check (2026-10-22)
+
+- **Handoff.** `local-qwen38-flash-next` implemented the phase in about 16
+  minutes, with exit 0. The runner's independent full gate was green (575
+  tests), the plan-scope check passed, and no test was edited. The
+  orchestrator squash-merged it onto this branch.
+- **Reviews.**
+  - `/review` recommended `pass`.
+  - `/review-adversarial` found the start-side double count and the
+    neighbour-inference flaw, both gaps in the spec and plan, which the stub's
+    time-blind answers could not expose. The owner settled them as D8.
+  - The session's own defects, all fixed by the orchestrator:
+    - a made-up `cacheWrite` rationale in a comment;
+    - `http.client.HTTPException` and `ValueError` escaping `urlopen_fetch`;
+    - `_without_host` mis-parsing IPv6 and userinfo;
+    - credentials accepted in `--metrics-url`;
+    - loose wording in the rerun warning;
+    - the false provenance bullet above.
+  - The orchestrator added tests for D8, credentials (including that no secret
+    is echoed) and a non-HTTP port; each was red first. It also pinned
+    behaviour the handoff already had: HTTP 500 is `MetricsQueryError`,
+    `file://` is `MetricsUnreachableError`, and a mid-pass transport failure
+    aborts the command.
+  - **Verdict:** `record-review ... model-defect`, because the findings
+    included defects in the session's own code. The runner then demoted
+    `local-qwen38-flash-next` for `phase:implement` (0/1 passed). Undoing that
+    is the owner's call (`delegate-run.sh reset local-qwen38-flash-next
+    phase:implement`).
+- **Gate:** green, 585 tests.
+- **Live check** (counts only).
+  - `run-table --metrics-url http://127.0.0.1:8428` over this checkout gave one
+    row: the handoff run, `joined`, source `served` (requested alias, served
+    llama-swap ID), `server_token_match = exact`. Both throughput columns were
+    filled, `server_ctx_high_water` was null (Strata has no `n_tokens_max`),
+    `server_cold_start` was false (qualification had loaded the model), and the
+    peak column was filled.
+  - Over the owner's two private projects plus this checkout: 16 rows, 1
+    `joined` and 15 `uncovered` (Maya runs; Maya has no metrics). The one
+    warning is 0001's existing orphaned-result-directory warning.
+  - Without the flag, stdout has no `server_` lines.

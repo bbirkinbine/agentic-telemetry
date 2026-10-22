@@ -139,3 +139,22 @@ def test_failed_known_models_call_raises_unreachable() -> None:
         join_server_metrics(three_rows(), BASE_URL, fake, NOW)
 
     assert fake.query_calls() == []
+
+
+def test_transport_failure_mid_pass_aborts_the_whole_join() -> None:
+    """D8: a lost connection after the known-models read stops the command.
+
+    An HTTP error status on one query stays that run's `error`; a refused or
+    timed-out connection usually breaks every later query too, so the caller
+    exits 1 and writes nothing rather than a table full of `error` rows.
+    """
+    fake = FakeVictoria(
+        known=KNOWN,
+        readings=model_readings(),
+        raise_on_query=MetricsUnreachableError("/api/v1/query: connection refused"),
+    )
+
+    with pytest.raises(MetricsUnreachableError):
+        join_server_metrics(three_rows(), BASE_URL, fake, NOW)
+
+    assert len(fake.label_calls()) == 1

@@ -56,31 +56,32 @@ CASES = [
         (ALIAS_QWEN,),
         ALIAS_QWEN,
         frozenset({FLASH}),
-        (FLASH, "inferred"),
-        id="echoed-alias-falls-to-inferred",
+        (None, "none"),
+        id="echoed-alias-is-not-inferred",
     ),
     pytest.param(
-        (ALIAS_QWEN,), (), ALIAS_QWEN, frozenset({QWEN}), (QWEN, "inferred"), id="rule3-inferred"
+        (), (), ALIAS_QWEN, frozenset({QWEN}), (QWEN, "inferred"), id="rule3-inferred-no-names"
+    ),
+    pytest.param(
+        (ALIAS_QWEN,), (), ALIAS_QWEN, frozenset({QWEN}), (None, "none"), id="names-block-rule3"
     ),
     pytest.param(
         (QWEN, FLASH),
         (),
         ALIAS_QWEN,
         frozenset({FLASH}),
-        (FLASH, "inferred"),
-        id="two-requested-known-falls-to-inferred",
+        (None, "none"),
+        id="two-requested-known-is-not-inferred",
     ),
     pytest.param(
         (QWEN,),
         (),
         FLASH,
         frozenset({FLASH}),
-        (FLASH, "inferred"),
-        id="requested-and-ledger-disagree-falls-to-inferred",
+        (None, "none"),
+        id="requested-and-ledger-disagree-is-not-inferred",
     ),
-    pytest.param(
-        (ALIAS_QWEN,), (), ALIAS_QWEN, frozenset({QWEN, FLASH}), (None, "none"), id="two-moved"
-    ),
+    pytest.param((), (), ALIAS_QWEN, frozenset({QWEN, FLASH}), (None, "none"), id="two-moved"),
     pytest.param(
         (ALIAS_UNKNOWN,), (), ALIAS_UNKNOWN, NOTHING_MOVED, (None, "none"), id="rule4-none"
     ),
@@ -120,3 +121,12 @@ def test_names_in_transcript_beat_counters_that_moved() -> None:
     result = resolve_model((ALIAS_QWEN,), (QWEN,), ALIAS_QWEN, frozenset(KNOWN), frozenset({FLASH}))
 
     assert result == (QWEN, "served")
+
+
+def test_ledger_model_id_also_contradicts_a_served_name() -> None:
+    """D8: an alias request, a known Maya ID in the ledger and a GLM answer is Maya."""
+    known = frozenset({MAYA, GLM})
+
+    result = resolve_model((ALIAS_MAYA,), (GLM,), MAYA, known, NOTHING_MOVED)
+
+    assert result == (MAYA, "requested")

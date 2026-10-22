@@ -28,11 +28,16 @@ time window**:
 - The delegate runner already records per run: `run_id`, `phase`, bucket, model entry,
   the fingerprint (model_id, quant, runtime, request settings, harness version), start
   and end times, attempts, outcome, and `record-review` verdict.
-- The Collector scrapes `llama-swap` `/metrics` and each `llama.cpp` server's `/metrics`
-  (router mode needs `?model=<id>`) every 15–30 s into VictoriaMetrics.
-- Analysis joins each run's `[start, end]` window to the metrics for that model ID.
-  One run at a time on the server keeps the window unambiguous; if two runs overlap,
-  the window attribution is flagged, not guessed.
+- The stack's Collector scrapes llama-swap's own `/metrics`. An agent on the
+  inference host scrapes each model server on its own port every 30 s, labelled
+  with the llama-swap `model_id` (spec 0007).
+- `run-table --metrics-url` joins each run's window to that model's series (spec
+  0005):
+  - the model comes from the run's own transcript, with no hand-kept alias table;
+  - throughput comes from counter increases, and the run's tokens are reconciled
+    against the server's (`exact`, `server_more`, `server_less`);
+  - each run gets a status: `joined`, `joined_approx`, `overlap`, `uncovered`,
+    `no_data` or `error`. Overlapping or shared traffic is flagged, never apportioned.
 
 Server metrics that carry signal (llama.cpp `--metrics`, names verified 2026-10-21):
 
