@@ -119,25 +119,36 @@ def assistant_message(
     cache_write: int = 0,
     reasoning: int = 0,
     message_id: str = "m-assistant",
+    model: str | None = None,
+    response_model: str | None = None,
 ) -> JsonObject:
-    """Return one Pi transcript line for an assistant message carrying `usage`."""
+    """Return one Pi transcript line for an assistant message carrying `usage`.
+
+    `model` and `response_model` become the message's `model` and `responseModel`
+    keys; each key is left out when its argument is None.
+    """
+    message: JsonObject = {
+        "role": "assistant",
+        "content": [{"type": "text", "text": "synthetic reply"}],
+        "usage": {
+            "input": tokens_in,
+            "output": tokens_out,
+            "cacheRead": cache_read,
+            "cacheWrite": cache_write,
+            "reasoning": reasoning,
+            "totalTokens": tokens_in + tokens_out + cache_read + cache_write + reasoning,
+        },
+    }
+    if model is not None:
+        message["model"] = model
+    if response_model is not None:
+        message["responseModel"] = response_model
     return {
         "type": "message",
         "id": message_id,
         "parentId": "m-parent",
         "timestamp": "2026-10-20T10:01:00.000Z",
-        "message": {
-            "role": "assistant",
-            "content": [{"type": "text", "text": "synthetic reply"}],
-            "usage": {
-                "input": tokens_in,
-                "output": tokens_out,
-                "cacheRead": cache_read,
-                "cacheWrite": cache_write,
-                "reasoning": reasoning,
-                "totalTokens": tokens_in + tokens_out + cache_read + cache_write + reasoning,
-            },
-        },
+        "message": message,
     }
 
 

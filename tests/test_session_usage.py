@@ -137,3 +137,110 @@ def test_transcript_cut_inside_a_multibyte_character_still_counts(tmp_path: Path
     assert usage.assistant_turns == 1
     assert len(usage.warnings) == 1
     assert f"{transcript}:3" in usage.warnings[0]
+
+
+def test_model_names_are_distinct_in_first_seen_order_across_sorted_files(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "results" / "run-handoff"
+    write_session(
+        run_dir,
+        [
+            session_header("s-two"),
+            assistant_message(tokens_in=1, tokens_out=1, model="req-c", response_model="srv-x"),
+            assistant_message(tokens_in=1, tokens_out=1, model="req-a", response_model="srv-z"),
+        ],
+        name="0002.jsonl",
+    )
+    write_session(
+        run_dir,
+        [
+            session_header("s-one"),
+            assistant_message(tokens_in=1, tokens_out=1, model="req-b", response_model="srv-y"),
+            assistant_message(tokens_in=1, tokens_out=1, model="req-a"),
+            assistant_message(tokens_in=1, tokens_out=1, model="req-b", response_model="srv-x"),
+        ],
+        name="0001.jsonl",
+    )
+
+    usage = read_session_usage(run_dir / "session")
+
+    assert usage is not None
+    assert tuple(usage.requested_models) == ("req-b", "req-a", "req-c")
+    assert tuple(usage.served_models) == ("srv-y", "srv-x", "srv-z")
+
+
+def test_transcript_without_model_names_gives_empty_names(tmp_path: Path) -> None:
+    run_dir = tmp_path / "results" / "run-handoff"
+    write_session(run_dir, [session_header(), assistant_message(tokens_in=10, tokens_out=2)])
+
+    usage = read_session_usage(run_dir / "session")
+
+    assert usage is not None
+    assert tuple(usage.requested_models) == ()
+    assert tuple(usage.served_models) == ()
+
+
+def test_requested_name_without_response_model_records_no_served_name(tmp_path: Path) -> None:
+    """Pi writes `responseModel` only when the server answered with a different name."""
+    run_dir = tmp_path / "results" / "run-handoff"
+    write_session(
+        run_dir,
+        [
+            session_header(),
+            assistant_message(tokens_in=10, tokens_out=2, model="qwen3.8-27b-ud-q8_k_xl"),
+        ],
+    )
+
+    usage = read_session_usage(run_dir / "session")
+
+    assert usage is not None
+    assert tuple(usage.requested_models) == ("qwen3.8-27b-ud-q8_k_xl",)
+    assert tuple(usage.served_models) == ()
+
+
+def test_model_names_on_non_assistant_lines_are_ignored(tmp_path: Path) -> None:
+    run_dir = tmp_path / "results" / "run-handoff"
+    write_session(
+        run_dir,
+        [
+            session_header(),
+            {"type": "model_change", "id": "c1", "provider": "example", "modelId": "req-other"},
+            assistant_message(tokens_in=10, tokens_out=2, model="req-a", response_model="srv-a"),
+        ],
+    )
+
+    usage = read_session_usage(run_dir / "session")
+
+    assert usage is not None
+    assert tuple(usage.requested_models) == ("req-a",)
+    assert tuple(usage.served_models) == ("srv-a",)
+
+
+def test_peak_turn_prompt_tokens_is_the_largest_input_plus_cache_of_one_turn(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "results" / "run-handoff"
+    write_session(
+        run_dir,
+        [
+            session_header("s-one"),
+            assistant_message(tokens_in=100, tokens_out=10, cache_read=5),  # 105
+            assistant_message(tokens_in=50, tokens_out=10, cache_read=800, cache_write=50),  # 900
+        ],
+        name="0001.jsonl",
+    )
+    write_session(
+        run_dir,
+        [
+            session_header("s-two"),
+            # 400 prompt tokens; output and reasoning are not context.
+            assistant_message(tokens_in=400, tokens_out=5000, reasoning=3000),
+        ],
+        name="0002.jsonl",
+    )
+
+    usage = read_session_usage(run_dir / "session")
+
+    assert usage is not None
+    assert usage.peak_turn_prompt_tokens == 900
