@@ -1,10 +1,9 @@
 # Telemetry stack: the source-agnostic collector
 
-> Status, 2026-10-22: the stack runs on the Mac under OrbStack, a
-> Docker-compatible runtime (spec 0003), and passed a live smoke test. Per-model server metrics come from an agent on
-> the inference host (spec 0007, `inference-agent/`). Spec 0006 moves it to the
-> telemetry VM; its repository changes are done and the bring-up is in progress.
-> See *Verification* at the end.
+> Status, 2026-10-22: the stack runs on the telemetry VM (spec 0006) and passed
+> its bring-up checks on the LAN. Per-model server metrics come from an agent on the inference
+> host (spec 0007, `inference-agent/`). The Mac's copy under OrbStack (spec 0003)
+> is stopped and kept as a test bed on `127.0.0.1`. See *Verification* at the end.
 
 ## What it is
 
@@ -44,11 +43,12 @@ samples to the Collector as OTLP on 4318 (*Inference host agent*).
 | Item | Value | Why |
 |---|---|---|
 | Name | `telemetry` | separate failure domain from the existing monitoring VM, which is too small to add three stores |
-| OS | Ubuntu 24.04 LTS (`noble`), amd64; Docker Engine (`docker-ce`) and `docker-compose-plugin` from Docker's apt repository | same as the rest of the lab (0006, D3) |
-| Size | 4 vCPU, 8 GB RAM, 250 GB thin disk | single-developer volume is tiny; disk is the only thing that grows |
+| OS | Ubuntu 24.04 LTS (`noble`), amd64; Docker Engine (`docker-ce`) and `docker-compose-plugin` from Docker's apt repository, with the default containerd image store (at bring-up: 24.04.4, Engine 29.9.2, Compose v5.6.1) | same as the rest of the lab (0006, D3) |
+| Size | 4 vCPU, 8 GB RAM, 250 GB thin disk on node-local NVMe | single-developer volume is tiny; disk is the only thing that grows |
+| Provisioning | the owner's homelab repository: an OpenTofu role clones the VM from the lab's Ubuntu template; an Ansible role installs Docker, puts the admin user in the `docker` group, creates `/srv/telemetry` with the ownership in *Run locally on the Mac*, and caps container logs (`json-file`, 3 × 50 MB) | provisioning code stays out of this repository (0006, Non-goals); `compose.yaml` sets no logging limits and the data root shares `/` with the OS |
 | Network | ports published on the VM's LAN IP only (DHCP reservation); no Tailscale on the VM: Tailnet clients reach it through the existing subnet router; no public exposure | same policy as the inference gateway in `ENDPOINTS.md`; one address avoids a Tailnet IP failing to bind before `tailscaled` starts (0006) |
-| Storage | `/srv/telemetry/{archive,landing,collector-state,victoria,loki,tempo}` | archive can be an NFS mount from the NAS |
-| Backup | PBS backs up the VM; the archive is also rsynced to the NAS (shown here as `nas.example`) | the archive is the irreplaceable part |
+| Storage | `/srv/telemetry/{archive,landing,collector-state,victoria,loki,tempo}`, a directory on the root filesystem | archive can be an NFS mount from the NAS |
+| Backup | none yet: PBS for the VM and a copy of `archive/` to the NAS (shown here as `nas.example`) are planned, outside spec 0006 | the archive is the irreplaceable part |
 
 ## Services (compose.yaml)
 
@@ -186,17 +186,13 @@ telemetry VM (spec 0006). Only the untracked `.env` differs.
    - `LLAMA_SWAP_TARGET`: `host:port` of the llama-swap gateway, from the vault's
      `ENDPOINTS.md`.
    - `TELEMETRY_BIND_ADDR`: the address every published port binds to.
-     - `0.0.0.0` on the home network, so the inference host agent can reach the
-       Collector (spec 0007, D1). The macOS firewall, if on, must allow
-       incoming connections for OrbStack, the Mac's Docker runtime.
-     - `127.0.0.1` anywhere else, or stop the stack before leaving home: with
-       `0.0.0.0` the stores and OTLP intake are open on any network the laptop
-       joins, including VictoriaMetrics' unauthenticated admin API. A laptop
-       that sleeps at home and wakes elsewhere resumes the stack as it was.
-       The agent queues on disk until the Mac is back.
-     - To see what is open away from home, `lsof -nP -iTCP:4318 -iTCP:8428
-       -sTCP:LISTEN`: a `*:` address means all interfaces, so run
-       `docker compose stop`.
+     - On the Mac, `127.0.0.1`. The inference host agent sends to the VM, so
+       nothing outside the Mac needs to reach this stack. While the Mac hosted
+       the stack it bound `0.0.0.0` on the home network for that agent
+       (spec 0007, D1); with `0.0.0.0` the stores and OTLP intake are open on any
+       network the laptop joins, including VictoriaMetrics' unauthenticated admin
+       API. `lsof -nP -iTCP:4318 -iTCP:8428 -sTCP:LISTEN` shows what is open: a
+       `*:` address means all interfaces.
      - The VM uses its LAN address; the Tailnet reaches it through the subnet
        router (spec 0006).
 
@@ -483,21 +479,27 @@ look at in a year; the raw records are what you go back to when a number looks w
 
 ## Bring-up order
 
-1. Create the VM (Ubuntu 24.04 LTS, amd64) with a DHCP reservation for its LAN
-   address, mount `/srv/telemetry`, and install Docker Engine and the Compose
-   plugin from Docker's apt repository.
+1. Provision the VM (Ubuntu 24.04 LTS, amd64, sized as in *VM*) and install
+   Docker Engine and the Compose plugin from Docker's apt repository. The owner
+   does both from their homelab repository (*VM* → Provisioning); a hand-built VM
+   works too. Give its LAN address a DHCP reservation. `/srv/telemetry` is a
+   directory on the root filesystem.
 2. Copy exactly `compose.yaml env.example otel-collector.yaml loki-config.yaml
-   tempo.yaml` from the Mac's `collector/` with `scp` (never the Mac's `.env`; no
-   repository credentials on the VM). `cp env.example .env` and set the three variables,
-   with `TELEMETRY_BIND_ADDR` = the VM's LAN address and `TELEMETRY_ROOT=/srv/telemetry`.
-   Create the data root as in *Run locally on the Mac* (the Linux ownership
-   steps). `docker compose up -d`.
+   tempo.yaml` from the Mac's `collector/` with `scp` into the stack directory
+   (`/opt/telemetry/collector` on the owner's VM; never the Mac's `.env`; no
+   repository credentials on the VM). There, `cp env.example .env`, `chmod 0600
+   .env`, and set the three variables, with `TELEMETRY_BIND_ADDR` = the VM's LAN
+   address and `TELEMETRY_ROOT=/srv/telemetry`. Create the data root as in *Run
+   locally on the Mac* (the Linux ownership steps) unless provisioning did; either
+   way `stat -c '%u:%g %a %n' /srv/telemetry/*` shows `10001:10001` on `archive`,
+   `collector-state`, `loki` and `tempo`. `docker compose up -d`.
 3. Check Collector health on the bind address, for example
    `curl -fsS http://192.0.2.10:13133`, replacing `192.0.2.10` with the
    `TELEMETRY_BIND_ADDR` value from `.env`. Validate `otel-collector.yaml` before the first
    start, as in its header comment.
 4. Send a synthetic span with `telemetrygen` or point one Claude Code session at it with the client snippet; confirm a file appears under `archive/` and the metric shows in VictoriaMetrics' `/api/v1/query`.
-5. Add the three Grafana data sources on the monitoring VM.
+5. Optionally, add the three data sources to Grafana on the monitoring VM
+   (outside spec 0006).
 6. Add the VM and ports to `ENDPOINTS.md` in the vault.
 7. On each Mac, ship evidence to the VM and schedule it (spec 0006):
    1. Give the VM's address a `Host 192.0.2.10` stanza with your `User` in
@@ -511,20 +513,26 @@ look at in a year; the raw records are what you go back to when a number looks w
       only letters, digits, `.`, `_` and `-`; others are skipped (exit 1), since
       the VM's shell would split them.
    3. Copy `mac-agent/com.example.ship-ledgers.plist` to
-      `~/Library/LaunchAgents/`, replace its placeholder paths and VM address
-      (point the log paths at a directory that already exists, written as the
+      `~/Library/LaunchAgents/<label>.plist`, where `<label>` is your own
+      reverse-DNS label replacing the template's `com.example.ship-ledgers`
+      (the file is named after it). Replace its placeholder paths and VM address
+      too (point the log paths at a directory that already exists, written as the
       absolute path of `~/Library/Logs/`: launchd neither expands `~` nor
       creates a missing directory, and the job would not start), then `plutil -lint` it, `launchctl bootstrap gui/$(id -u) <plist>` and
-      `launchctl kickstart gui/$(id -u)/com.example.ship-ledgers`. After editing a
-      loaded plist, `launchctl bootout gui/$(id -u)/com.example.ship-ledgers`
+      `launchctl kickstart gui/$(id -u)/<label>`. After editing a
+      loaded plist, `launchctl bootout gui/$(id -u)/<label>`
       first. If the log stays empty, `launchctl print
-      gui/$(id -u)/com.example.ship-ledgers` shows the `last exit code`.
+      gui/$(id -u)/<label>` shows the `last exit code`.
    4. Read the log file the plist names. A `no projects found` or `Operation
       not permitted` line means macOS privacy hid the projects folder from the
       job: grant Full Disk Access to `/bin/bash` (every launchd-run bash job then
       has it) and kickstart again (0006, D5).
-8. Once the VM is live, `docker compose stop` the Mac's stack; its data root stays
-   as a test bed, started on `127.0.0.1` for config trials (0006, D6).
+8. Once the inference host agent sends to the VM, set the Mac's
+   `TELEMETRY_BIND_ADDR` back to `127.0.0.1` and `docker compose stop` its stack;
+   its data root stays as a test bed, started on `127.0.0.1` for config trials
+   (0006, D6). `restart: unless-stopped` already keeps a stopped container down
+   across restarts; `docker update --restart=no` on each container is a second
+   guard, lost when a later `up` recreates them.
 
 ## Verification
 
@@ -710,6 +718,64 @@ Validated today with the pinned images, on the Mac, via Docker:
   - `docker compose --env-file env.example config --quiet` passes after the
     comment-only change to `compose.yaml`.
 
+- Telemetry VM bring-up, spec 0006 Phase B, 2026-10-22 (step numbers are the
+  spec's runbook):
+  - **VM (B1).** Ubuntu 24.04.4 LTS, amd64, 4 vCPU, 8 GB, a 246 GB root
+    filesystem. Docker Engine 29.9.2 and Compose v5.6.1 from
+    `download.docker.com` (`noble stable`), containerd image store. Before the
+    stack, `ufw` allowed only 22/tcp and only sshd and systemd-resolved listened.
+  - **Files and data root (B2).** The five files on the VM have the same SHA-256
+    as the commit. Owners: `10001:10001` on `archive`, `collector-state`, `loki`
+    and `tempo`; root on `victoria`; the admin user on `landing` (`0755`).
+    `otelcol-contrib validate` (by digest, with the archive feature gate) and
+    `docker compose config --quiet` pass on the VM.
+  - **Start and images (B3, B4).** All four services run and log no
+    `permission denied`. `docker compose images` on the VM shows the pinned index
+    digests, the same as the Mac's `RepoDigests`.
+  - **Smoke test and config (B5–B8).** Health returns 200. One telemetrygen trace,
+    metric and log landed in Tempo, VictoriaMetrics and Loki, and once in each
+    archive file. `up{service_name="llama-swap"}` is 1. Loki's running config
+    shows `reject_old_samples: true` and `reject_old_samples_max_age: 2y`.
+  - **Listeners and reboot (B9).** The six ports listen only on the LAN address,
+    through `docker-proxy`, before and after a reboot. The services were back
+    within about 20 s with the smoke data and the scrape intact.
+  - **Shipping (B11–B16).**
+    - With a `Host` stanza, `ssh -o BatchMode=yes` succeeds. A manual ship took
+      22 s, exit 0: three projects and three clients.
+    - The first launchd cycle exited 126 with `Operation not permitted`: the
+      script sits in a privacy-protected folder. With Full Disk Access for
+      `/bin/bash` (D5), the next cycle exited 0 with the same six lines.
+    - The VM's `landing/<host>/` and a fresh `--dest` copy both hold 770 files;
+      only the 2 transcripts still being written differ.
+    - An unreachable address gave one `unreachable, skipped` line, exit 0, in
+      5 s; the next cycle shipped the transcript written in between.
+  - **File modes.** UID 10001 reads all 3 landed ledgers. The amended check
+    still prints a `Permission denied` for `landing/<host>/_sessions/claude-code`:
+    Claude Code keeps its transcript folders `0700`, the copy keeps that mode, and
+    the Collector never reads transcripts. The check has no `-prune`, so `find`
+    descends into `_sessions/` and reports its `0700` folders; read only the ledger
+    lines of its output.
+  - **Loki window (B17).** After `POST /flush`, Loki and the landing zone both
+    hold 28 ledger lines, equal per project. No `loki_discarded_samples_total`
+    series exists. One ledger line's `ts` equals its Loki timestamp.
+  - **Inference agent (B18).** The host agent changed only
+    `TELEMETRY_OTLP_ENDPOINT`. Sent points rose, the queue stayed at 0, and no
+    export errors were logged. `up{service_name="inference-models"}` on the VM
+    returns both `model_id`s (0 while the models are unloaded).
+  - **Mac (B19).** `TELEMETRY_BIND_ADDR=127.0.0.1`; the stack is stopped with
+    restart policy `no`, and nothing on the Mac listens on the six ports.
+  - **Run join (B24).** A throwaway Flash Next handoff (test-first+implement,
+    452 s, never pushed), joined against the VM: the served model resolved from
+    the transcript, and the server's counters read 81,627 prompt and 16,889
+    generated tokens, exactly the session's total. The status was `overlap`
+    (`server_more`), not `joined`. The session's test-first subagent ran on the
+    same model, Pi records the subagent's usage on its `subagent` tool result,
+    and `run-table` sums only assistant messages, so the run's own totals were
+    20,705 and 7,291 tokens short. A follow-up spec counts subagent usage.
+
 Not yet done:
-- the VM bring-up (spec 0006, Phase B);
+- B10, reachability over the Tailnet and from outside both networks (deferred);
+- backups (PBS, a NAS copy of `archive/`) and Grafana data sources, outside
+  spec 0006;
+- counting subagent usage in `run-table` (spec 0009);
 - the Codex `[otel]` exporter syntax.

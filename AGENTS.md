@@ -254,7 +254,7 @@ Rules for anything that comes from outside:
 - Research papers are cited, never pasted; private repos and the vault are
   never named as sources in tracked files.
 
-## Open work / current state (updated 2026-10-22)
+## Open work / current state (updated 2026-10-22, after 0006)
 
 - Bootstrapped 2026-10-21 (full profile). `analysis/` is a design draft.
 - Product spec `docs/specs/0000-product.md` exists. Spec 0001 (run table from
@@ -272,7 +272,8 @@ Rules for anything that comes from outside:
   agentic-scaffold repo, vault prompt `Agentic Scaffold Telemetry - Agent Prompt`)
   only for the tool-call ledger reader (the rest of roadmap unit 2).
 - Spec 0003 (local collector stack) is shipped:
-  - `collector/` runs on the owner's Mac under OrbStack. Images are pinned
+  - `collector/` first ran on the owner's Mac under OrbStack (now a stopped test
+    bed; the stack runs on the VM since 0006). Images are pinned
     by multi-arch digest, and host values come from the untracked `collector/.env`
     (template `collector/env.example`). Ports bind to `TELEMETRY_BIND_ADDR`.
   - The archive is native-zstd OTLP JSON (`archive/<signal>.jsonl*.zst`), behind
@@ -293,11 +294,10 @@ Rules for anything that comes from outside:
     added). Uncovered: Project Maya v1.1.4 and Sybil.
   - A loaded llama.cpp model delivered 16 `llamacpp_*` series with `model_id`.
     It unloaded on its 900 s TTL, and nothing reloaded it.
-  - While the stack is on the Mac, the Mac binds `0.0.0.0` on the home network
-    (0007 D1). 0006 repoints the agent to the VM and returns the Mac to
-    `127.0.0.1`.
+  - It sends to the telemetry VM since 0006 (B18). The Mac bound `0.0.0.0` only
+    while it hosted the stack (0007 D1); it is back on `127.0.0.1`.
   - Follow-ups:
-    - an easier install (a one-command script, or Ansible together with 0006);
+    - an easier install (a one-command script, or Ansible);
     - llama-swap issue #1135: if llama-swap's own `/metrics` gains per-model
       data, the agent can be retired.
 - Spec 0005 (server-metrics join) is shipped:
@@ -321,16 +321,36 @@ Rules for anything that comes from outside:
     and never copies a symlink. Two projects with one name are skipped (exit 1).
   - The Collector tails only ledgers, timestamps each line with its own `ts`,
     and gives each project its own Loki stream. Transcripts are read in batch,
-    never tailed. Loki refuses lines older than a week; the archive keeps them.
+    never tailed. Loki refused lines older than a week until 0006 widened its
+    window to two years; the archive keeps everything.
   - `run-table` keeps the copy with more reviews when one is a stale copy of
     the other, with a warning. Any other difference still exits 1.
   - The local landing zone gives the same run and session rows as the project
     roots.
-- Roadmap unit 3 continues in draft spec 0006, the VM deployment. It takes
-  over launchd scheduling for the ship script, the easier inference-host install,
-  and Loki's history window.
-- Next: 0006, server columns for the session table (a follow-up 0005 names), or
-  the rest of roadmap unit 2 once the scaffold's Phase 1 lands.
+- Spec 0006 (telemetry VM deployment) is shipped:
+  - The stack runs on the `telemetry` VM (Ubuntu 24.04 amd64, Docker from
+    Docker's apt repository), provisioned from the owner's homelab repository.
+    Its ports bind to the VM's LAN address only; Tailnet clients are meant to
+    reach it through the subnet router (not yet checked, B10). Loki accepts lines up to two years old
+    (`reject_old_samples_max_age: 17520h`).
+  - The inference host agent sends to the VM. The Mac's stack is stopped, kept
+    as a test bed on `127.0.0.1`.
+  - A launchd job on the Mac runs `ship-ledgers.sh` every 15 minutes in SSH batch
+    mode with connect and idle timeouts (template
+    `collector/mac-agent/com.example.ship-ledgers.plist`). It needs Full Disk
+    Access for `/bin/bash` when the projects sit in a privacy-protected folder.
+    Remote mode skips project names the VM's shell would split.
+  - The bring-up checks are in `collector/README.md` → Verification.
+    Tailnet and off-network reachability is deferred. Grafana data sources,
+    PBS backups and a NAS copy of `archive/` are outside 0006 (D11): until
+    then the VM's disk holds the only copy of new telemetry.
+  - Finding: `run-table` does not count a subagent's token usage (Pi records it
+    on the `subagent` tool result), so a handoff that used a subagent joins as
+    `overlap`. A follow-up spec fixes it.
+- Next: spec 0009 (count subagent usage, drafted); spec 0008 (local-model request/response
+  capture, drafted); the easier inference-host install; server columns for the
+  session table (a follow-up 0005 names); or the rest of roadmap unit 2 once the
+  scaffold's Phase 1 lands.
 
 <!-- agentic-scaffold:standing-rules:start -->
 

@@ -1,6 +1,6 @@
 # 0006 — Telemetry VM Deployment
 
-**Status:** shipping
+**Status:** shipped
 **Last updated:** 2026-10-22
 **Depends on:** 0003, 0004
 **Roadmap unit:** 3 (with 0003, 0004, 0005, 0007)
@@ -11,7 +11,7 @@ Move the stack proven on the Mac (0003) to its permanent home: a `telemetry` VM
 on the homelab Proxmox cluster, as `collector/README.md` designs it. Point the
 ship script (0004) at it on a schedule. On the Mac the stack is a test bed: it
 stops scraping when the Mac sleeps and keeps its data on one laptop. The VM keeps
-scraping, holds the archive, and is backed up.
+scraping and holds the archive; backups come later, outside 0006 (D11).
 
 ## Success criteria
 
@@ -30,7 +30,8 @@ scraping, holds the archive, and is backed up.
   (`TELEMETRY_BIND_ADDR` = the VM's LAN address, held by a DHCP reservation). It
   runs no Tailscale: Tailnet clients reach it through the existing subnet router,
   which already advertises the LAN. A Tailnet client away from home reaches the
-  OTLP and query ports, and a host outside both networks cannot. Docker bypasses
+  OTLP and query ports, and a host outside both networks cannot (both checks
+  deferred, D11). Docker bypasses
   `ufw`, so this is checked from such a host, not assumed from the firewall rules.
   The subnet router is a single point of failure for remote access; that is
   accepted here.
@@ -65,29 +66,30 @@ scraping, holds the archive, and is backed up.
   VictoriaMetrics. The Mac's `collector/.env` then goes back to
   `TELEMETRY_BIND_ADDR=127.0.0.1` (0007 D1 applied only while the stack ran on the
   Mac).
-- The three data sources (VictoriaMetrics, Loki, Tempo) are added to the existing
-  Grafana on the monitoring VM. A query from Grafana returns the synthetic metric.
-- Backups:
-  - PBS backs up the VM.
-  - The archive is rsynced to the NAS.
-  - One restore of an archive file from the NAS is checked.
 - The VM's address and ports are recorded in the vault's `ENDPOINTS.md`, never
   in a tracked file.
 - `collector/README.md` → Verification records the VM bring-up date and the
   checks above.
 - 0005 has shipped, so its check is repeated on the VM: `run-table
   --metrics-url` against the VM's VictoriaMetrics joins a delegate run made after
-  deployment (owner decision, 2026-10-21, from the 0003 review).
+  deployment (owner decision, 2026-10-21, from the 0003 review). Accepted on the
+  VM side; the status read `overlap` (D11).
 
 ## Non-goals
 
-- Provisioning as code (Terraform, cloud-init). The VM is created by hand
-  following the README's bring-up order.
+- Provisioning code in this repository. The owner's homelab repository creates
+  the VM (an OpenTofu role, cloned from the lab's Ubuntu 24.04 template) and
+  installs Docker (an Ansible role). This repository records only the result that
+  `collector/README.md` → VM requires, and B1's check verifies it (2026-10-22;
+  the draft said the VM would be built by hand).
 - Moving data the Mac stack collected during testing. The VM starts empty; the
   landing zone refills from the ship script.
 - Grafana dashboards. Their content is AGPL and never copied here.
 - Collector auth, and exposure beyond LAN and Tailnet.
 - Tailscale on the VM. The subnet router covers Tailnet access.
+- Grafana data sources on the monitoring VM, PBS backups of the VM, and a NAS
+  copy of `archive/` (owner decision D11, 2026-10-22; the draft listed them as
+  success criteria).
 - An easier install for the inference-host agent: a separate spec, numbered
   when drafted (owner decision, 2026-10-22). 0006 only repoints the existing agent, a one-line
   `.env` change that the inference host's sysadmin agent makes.
@@ -144,7 +146,10 @@ Answered by the owner on 2026-10-22, approving the plan with every recommendatio
   re-checked with `docker compose ... config --quiet`.
 - **D2, Loki schema start.** No action: the earliest ledger line on the owner's
   Mac is 2026-10-14, after the schema's `from: "2026-01-01"` (checked 2026-10-22).
-- **D3, VM OS.** Ubuntu 24.04 LTS (`noble`), amd64.
+- **D3, VM OS.** Ubuntu 24.04 LTS (`noble`), amd64. Provisioned from the owner's
+  homelab repository, not by hand (2026-10-22). The 250 GB thin disk is on
+  node-local NVMe, and `/srv/telemetry` is a directory on the single root
+  filesystem, not a separate mount.
 - **D4, files onto the VM.** `scp` the tracked `collector/` files from the Mac;
   no repository credentials on the VM. `git clone` once the repository is public.
 - **D5, macOS privacy.** The first launchd cycle runs with no grant. If the log
@@ -174,6 +179,16 @@ Phase A:
   comments in `collector/README.md`, `collector/env.example` and
   `collector/compose.yaml` (comment-only, re-checked with `config --quiet`),
   keeping one line of history pointing at 0007 D1.
+- **D11, closing scope (owner, 2026-10-22).** 0006 ships with:
+  - B20 (Grafana data sources), B21 (PBS) and B22 (NAS copy of `archive/`) out
+    of scope, moved to Non-goals;
+  - B10 (Tailnet and off-network reachability) deferred: the owner works on the
+    home network for now;
+  - B23 done: the orchestrator wrote the VM's entry in the vault's
+    `ENDPOINTS.md`;
+  - B24 accepted on its VM side (served model resolved; the server's tokens equal
+    the session's full total). The `overlap` status comes from `run-table` not
+    counting subagent usage, a spec 0001 reader gap that spec 0009 fixes.
 
 ## Approved implementation plan
 
@@ -372,3 +387,29 @@ Markdown escape; in a shell it is a plain `|`.
 - **Phase C hygiene:** keep `<host>` literal in the Verification block (the
   landing directory is the Mac's short hostname), and summarize log lines
   instead of pasting them (they carry home paths).
+
+### How the bring-up departed from the plan (2026-10-22)
+
+Results are in `collector/README.md` → Verification.
+
+- **B1:** the VM came from the homelab repository's OpenTofu role and Docker from
+  its Ansible role, which also created `/srv/telemetry` with B2's ownership and
+  set Docker's container log rotation. The B1 check is unchanged. The stack lives
+  in `/opt/telemetry/collector`.
+- **Who ran the steps:** with the owner approving each ssh and scp, the
+  orchestrator ran B2–B9, B12–B17 and the `docker compose stop` half of B19. It
+  wrote the VM's `.env` from `env.example`, never the Mac's `.env`; the owner set
+  the Mac's `TELEMETRY_BIND_ADDR`. B13 installed the plist under the owner's own
+  label, which the README now asks for. The Mac's containers also got restart
+  policy `no`, so a restart does not bring them back.
+- **B10:** deferred by the owner (Tailnet and off-network reachability).
+- **File modes:** passes for every ledger. The check's output is not empty
+  because `_sessions/claude-code` is `0700` by design; see the README.
+- **B24:** no 0006 phase was left to hand off, so a throwaway spec on a local,
+  never-pushed branch gave Flash Next a test-first+implement handoff. The VM side
+  of the join is proven (served model resolved; server tokens equal the session's
+  full total). The status read `overlap` because `run-table` does not count a
+  subagent's usage, which Pi records on a tool result. That is a reader gap from
+  spec 0001, fixed in spec 0009 (drafted), not a 0006 defect.
+- **B20–B22:** out of scope (D11). **B23:** done; the orchestrator wrote the
+  vault entry.
