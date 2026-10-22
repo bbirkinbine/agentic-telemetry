@@ -15,7 +15,13 @@ import duckdb
 from agentic_telemetry.run_table.row import RunRow
 
 LIST_COLUMNS = frozenset(
-    {"unverified_steps", "attempt_outcomes", "requested_models", "served_models"}
+    {
+        "unverified_steps",
+        "attempt_outcomes",
+        "requested_models",
+        "served_models",
+        "subagent_models",
+    }
 )
 BOOLEAN_COLUMNS = frozenset({"qualified", "server_cold_start"})
 # Seconds can be fractional in some harness versions, so they are DOUBLE.
@@ -34,6 +40,8 @@ BIGINT_COLUMNS = frozenset(
         "compactions",
         "retries",
         "peak_turn_prompt_tokens",
+        "subagent_runs",
+        "subagent_turns",
         "server_prompt_tokens",
         "server_predicted_tokens",
         "server_deferred_max",

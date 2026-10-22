@@ -772,10 +772,10 @@ Validated today with the pinned images, on the Mac, via Docker:
     same model, Pi records the subagent's usage on its `subagent` tool result,
     and `run-table` sums only assistant messages, so the run's own totals were
     20,705 and 7,291 tokens short. A follow-up spec counts subagent usage.
+    Spec 0009 now counts it, and the same run joins `joined` with `exact` tokens.
 
 Not yet done:
 - B10, reachability over the Tailnet and from outside both networks (deferred);
 - backups (PBS, a NAS copy of `archive/`) and Grafana data sources, outside
   spec 0006;
-- counting subagent usage in `run-table` (spec 0009);
 - the Codex `[otel]` exporter syntax.

@@ -254,7 +254,7 @@ Rules for anything that comes from outside:
 - Research papers are cited, never pasted; private repos and the vault are
   never named as sources in tracked files.
 
-## Open work / current state (updated 2026-10-22, after 0006)
+## Open work / current state (updated 2026-10-22, after 0009)
 
 - Bootstrapped 2026-10-21 (full profile). `analysis/` is a design draft.
 - Product spec `docs/specs/0000-product.md` exists. Spec 0001 (run table from
@@ -344,10 +344,26 @@ Rules for anything that comes from outside:
     Tailnet and off-network reachability is deferred. Grafana data sources,
     PBS backups and a NAS copy of `archive/` are outside 0006 (D11): until
     then the VM's disk holds the only copy of new telemetry.
-  - Finding: `run-table` does not count a subagent's token usage (Pi records it
-    on the `subagent` tool result), so a handoff that used a subagent joins as
-    `overlap`. A follow-up spec fixes it.
-- Next: spec 0009 (count subagent usage, drafted); spec 0008 (local-model request/response
+  - Finding: `run-table` did not count a subagent's token usage (Pi records it
+    on the `subagent` tool result), so a handoff that used a subagent joined as
+    `overlap`. Spec 0009 fixes it.
+- Spec 0009 (subagent usage in the run table) is shipped:
+  - A run's token columns add each Pi `subagent` tool result's `usage`. The
+    subagent's own transcript copies under `session/` are never read, so each
+    turn counts once, and landing-zone copies (parent transcripts only) give the
+    same rows.
+  - New columns `subagent_runs` (child runs), `subagent_turns` (their turns) and
+    `subagent_models` (child model names, without a `<provider>/` prefix that
+    matches the run's own provider). `assistant_turns`,
+    `peak_turn_prompt_tokens`, `tokens_reasoning` (Pi reports none for a
+    subagent) and `requested_models` stay the parent's, so the join still
+    resolves the parent's model.
+  - The session table is unchanged: it already gives each Pi child session its
+    own `is_subagent` row. Background subagents and grandchildren still
+    under-count (spec 0009 Notes).
+  - The B24 run now joins `joined` with `exact` tokens, from the project root and
+    from a landing-zone copy.
+- Next: spec 0008 (local-model request/response
   capture, drafted); the easier inference-host install; server columns for the
   session table (a follow-up 0005 names); or the rest of roadmap unit 2 once the
   scaffold's Phase 1 lands.
