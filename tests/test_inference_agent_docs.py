@@ -154,13 +154,14 @@ def test_endpoints_section_no_longer_says_the_stack_does_not_scrape_the_servers(
     )
 
 
-def test_run_locally_bind_addr_covers_home_network_and_away() -> None:
-    """Amended D1: `0.0.0.0` on the home network; stop or go back to loopback elsewhere."""
+def test_run_locally_bind_addr_puts_the_mac_on_loopback_and_keeps_0007_history() -> None:
+    """Spec 0006 D10: the Mac binds `127.0.0.1`; one line of history names 0007 D1's `0.0.0.0`."""
     bullet = bind_addr_bullet()
     for address in ("0.0.0.0", "127.0.0.1"):  # noqa: S104 (documented, not bound here)
         assert address in bullet, f"expected the TELEMETRY_BIND_ADDR bullet to name {address}"
-    assert re.search(r"\bstop\b", bullet, re.IGNORECASE), (
-        "expected the bullet to say to stop the stack away from home"
+    assert "0007" in bullet, "expected the bullet to keep its history line pointing at spec 0007"
+    assert re.search(r"On the Mac, `127\.0\.0\.1`", bullet), (
+        "expected the bullet to put the Mac on `127.0.0.1`"
     )
 
 
@@ -168,17 +169,16 @@ def test_run_locally_drops_the_dhcp_reservation_guidance() -> None:
     body = section_of(read_text(README), RUN_LOCALLY, relative(README))
     for rejected in ("reservation", "Private Wi-Fi"):
         assert rejected not in body, f"amended D1 drops {rejected!r} guidance from Run locally"
-    assert re.search(r"\bfirewall\b", body, re.IGNORECASE), (
-        "expected Run locally to say the macOS firewall must allow Docker"
-    )
 
 
-def test_env_example_bind_addr_comment_names_all_interfaces_at_home_and_keeps_loopback() -> None:
+def test_env_example_bind_addr_comment_names_mac_loopback_and_0007_history() -> None:
+    """Spec 0006 D10: the Mac on `127.0.0.1`, with one line of history naming 0007 D1."""
     comment = bind_addr_comment()
     for address in ("0.0.0.0", "127.0.0.1"):  # noqa: S104 (documented, not bound here)
         assert address in comment, f"expected the TELEMETRY_BIND_ADDR comment to name {address}"
+    assert "0007" in comment, "expected the comment to keep its history line pointing at 0007"
     assert not re.search(r"never\W+0\.0\.0\.0", comment, re.IGNORECASE), (
-        "amended D1 replaces 'never 0.0.0.0' with 0.0.0.0 on the home network"
+        "the history line names 0.0.0.0 on the home network, not 'never 0.0.0.0'"
     )
     assert "reserv" not in comment.lower(), "amended D1 needs no DHCP-reserved address"
     value = parse_env_example().get("TELEMETRY_BIND_ADDR")

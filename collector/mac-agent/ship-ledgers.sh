@@ -45,14 +45,21 @@ Environment:
   PI_CODING_AGENT_DIR          Pi's agent directory (default ~/.pi/agent).
   CODEX_HOME                   Codex's directory (default ~/.codex); transcripts under sessions/.
 
+Remote copies run ssh with BatchMode=yes: a key that is not usable without a
+prompt (for example under launchd) fails at once with exit 1 instead of hanging.
+Connect and idle timeouts end a stalled link within about a minute. In remote
+mode a project whose directory name has characters other than letters, digits,
+'.', '_' and '-' is skipped (exit 1): the VM's shell would split it.
+
 Symlinks are never copied. A PROJECTS_ROOT with no projects prints one line
 (macOS privacy settings can hide a protected directory from launchd jobs).
 
 Exit status: 0 when everything copied, or when the VM is unreachable and
 nothing else failed (one line; the next run catches up); 1 when a copy failed,
 ssh could not create the landing directory, two projects share a directory name
-(both skipped, everything else ships), or a project's .agentic, .agentic/delegate
-or .agentic/telemetry is a symlink (skipped), even if the VM is unreachable; 2
+(both skipped, everything else ships), a project's .agentic, .agentic/delegate
+or .agentic/telemetry is a symlink (skipped), even if the VM is unreachable, or
+a project name has characters remote mode refuses (skipped); 2
 for a usage error, including a PROJECTS_ROOT that is missing or not a directory.
 EOF
 }
@@ -158,18 +165,27 @@ if [[ -n "$DEST" ]]; then
   [[ -d "$DEST" ]] || mkdir -- "$DEST"
   mkdir -p -- "$DEST/$HOST/_sessions"
   TARGET="$DEST/$HOST"
+  RSH=()
 else
   # Reachable? (Tailscale or LAN). If not, do nothing; the next run catches up.
-  if ! nc -z -w 3 "$VM" 22 >/dev/null 2>&1; then
+  # -G is macOS nc's connect timeout; -w alone is an idle timeout (spec 0006, D8).
+  if ! nc -z -G 3 -w 3 "$VM" 22 >/dev/null 2>&1; then
     echo "ship-ledgers: $VM unreachable, skipped"
     # 0 for a plain offline run; 1 when discovery already found a problem (D10).
     exit "$FAILED"
   fi
-  if ! ssh "$VM" mkdir -p -- "$LANDING/$HOST/_sessions"; then
-    echo "ship-ledgers: could not create $LANDING/$HOST/_sessions on $VM over ssh" >&2
+  # BatchMode: never wait on a password or passphrase prompt (launchd has no TTY).
+  # The timeouts end a stalled link within about a minute, so one stuck run cannot
+  # block later launchd cycles (spec 0006, D9).
+  SSH_OPTS="-o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=4"
+  # shellcheck disable=SC2086 # SSH_OPTS is a fixed list of option words.
+  if ! ssh $SSH_OPTS "$VM" mkdir -p -- "$LANDING/$HOST/_sessions"; then
+    echo "ship-ledgers: could not create $LANDING/$HOST/_sessions on $VM over ssh" \
+      "(check the ssh key or agent and the known host key)" >&2
     exit 1
   fi
   TARGET="$VM:$LANDING/$HOST"
+  RSH=(-e "ssh $SSH_OPTS")
 fi
 
 copy() {
@@ -177,7 +193,7 @@ copy() {
   shift 3
   # -rpt, not -a: without -l a symlink is skipped, so neither a link nor its
   # target (a credential, or an absolute home path) reaches the landing zone.
-  if rsync -rpt "$@" "$source/" "$target/"; then
+  if rsync -rpt ${RSH[@]+"${RSH[@]}"} "$@" "$source/" "$target/"; then
     echo "ship-ledgers: shipped $label"
   else
     echo "ship-ledgers: copy failed: $source" >&2
@@ -203,9 +219,17 @@ PROJECT_FILTER=(
 i=0
 while ((i < ${#PROJECTS[@]})); do
   project="${PROJECTS[$i]}"
-  if ((SKIP[i] == 0)); then
-    copy "$(basename -- "$project")" "$project" "$TARGET/$(basename -- "$project")" \
-      "${PROJECT_FILTER[@]}"
+  name="$(basename -- "$project")"
+  if ((SKIP[i] != 0)); then
+    :
+  elif [[ -z "$DEST" && ! "$name" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    # ssh joins rsync's remote path into one command string that the VM's shell
+    # splits, and openrsync cannot protect it: refuse such names remotely (D7).
+    echo "ship-ledgers: skipped $project: '$name' has characters other than" \
+      "letters, digits, '.', '_' and '-', which the VM's shell would split" >&2
+    FAILED=1
+  else
+    copy "$name" "$project" "$TARGET/$name" "${PROJECT_FILTER[@]}"
   fi
   i=$((i + 1))
 done

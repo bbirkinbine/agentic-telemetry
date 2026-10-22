@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd job for ship-ledgers.sh (spec 0006): every 15 minutes, copy this Mac's
+  evidence to the telemetry VM's landing zone. Template only: every path and the
+  VM address are placeholders, and so is the Label. Copy it to
+  ~/Library/LaunchAgents/ under your own reverse-DNS label (the file named after
+  it), put in your real paths and the VM's LAN address (an address, not an ssh
+  config alias: the script probes it with nc), then follow collector/README.md ->
+  Bring-up order.
+
+  Keys from launchd.plist(5), the man page on macOS, read 2026-10-22.
+  StartInterval skips an interval that falls while the Mac sleeps; the next run
+  catches up. EnvironmentVariables takes string values only. KeepAlive is left
+  out (default false): the job runs on its interval, not continuously.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.example.ship-ledgers</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/path/to/agentic-telemetry/collector/mac-agent/ship-ledgers.sh</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PROJECTS_ROOT</key>
+    <string>/path/to/projects</string>
+    <key>TELEMETRY_VM</key>
+    <string>telemetry.example</string>
+  </dict>
+  <key>StartInterval</key>
+  <integer>900</integer>
+  <key>StandardOutPath</key>
+  <string>/path/to/logs/ship-ledgers.log</string>
+  <key>StandardErrorPath</key>
+  <string>/path/to/logs/ship-ledgers.log</string>
+</dict>
+</plist>
