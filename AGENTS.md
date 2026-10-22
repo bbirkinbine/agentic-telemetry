@@ -219,7 +219,8 @@ correctness. The rules, complete gate, and fresh semantic review still apply.
 ## Don't-touch list
 
 - `pyproject.toml` `[tool.uv]` section — ask first
-- `collector/*.yaml` and `collector/mac-agent/otel-agent.yaml` are validated
+- `collector/*.yaml`, `collector/mac-agent/otel-agent.yaml` and
+  `collector/inference-agent/otel-agent.yaml` are validated
   against pinned images (see `collector/README.md` → Verification); re-validate
   after any edit and record it there
 - `collector/landing/` contents and anything under `data/` are evidence, never
@@ -265,7 +266,7 @@ Rules for anything that comes from outside:
   agentic-scaffold repo, vault prompt `Agentic Scaffold Telemetry - Agent Prompt`)
   only for the tool-call ledger reader (the rest of roadmap unit 2).
 - Spec 0003 (local collector stack) is shipped:
-  - `collector/` runs on the owner's Mac under Docker Desktop. Images are pinned
+  - `collector/` runs on the owner's Mac under OrbStack. Images are pinned
     by multi-arch digest, and host values come from the untracked `collector/.env`
     (template `collector/env.example`). Ports bind to `TELEMETRY_BIND_ADDR`.
   - The archive is native-zstd OTLP JSON (`archive/<signal>.jsonl*.zst`), behind
@@ -275,16 +276,34 @@ Rules for anything that comes from outside:
     `/upstream/`, because that resets model TTL. The endpoint findings and the
     stored `llamacpp_*` names are in `collector/README.md`. ADR 0002 records the
     choice of the Grafana-stack stores.
+- Spec 0007 (inference host agent) is shipped:
+  - `collector/inference-agent/` is a Collector that runs on the inference host
+    with host networking. It scrapes each model server on its own port, using
+    targets from an untracked `targets.json` that also sets `model_id`, and sends
+    OTLP to the stack through a disk queue. llama-swap never sees these requests,
+    and a relabel rule drops any `/upstream/` path.
+  - Live since 2026-10-21. The owner copies the four files to the host, and its
+    sysadmin agent installs them. Covered: Strata and llama.cpp (`--metrics`
+    added). Uncovered: Project Maya v1.1.4 and Sybil.
+  - A loaded llama.cpp model delivered 16 `llamacpp_*` series with `model_id`.
+    It unloaded on its 900 s TTL, and nothing reloaded it.
+  - While the stack is on the Mac, the Mac binds `0.0.0.0` on the home network
+    (0007 D1). 0006 repoints the agent to the VM and returns the Mac to
+    `127.0.0.1`.
+  - Follow-ups:
+    - an easier install (a one-command script, or Ansible together with 0006);
+    - llama-swap issue #1135: if llama-swap's own `/metrics` gains per-model
+      data, the agent can be retired.
 - Roadmap unit 3 continues in draft specs:
   - 0004: landing-zone shipping and ledger ingestion. It also revisits two 0001
     defaults: a stale landing-zone copy is a conflict that exits 1, and an
     inbox-era ledger path takes `delegate` as its `project`.
-  - 0007: a scraper on the inference host for per-model `llamacpp_*` metrics.
-  - 0005: the server-metrics join. It depends on 0007 and needs a mapping from
-    ledger profile alias to llama-swap model ID.
+  - 0005: the server-metrics join, now unblocked by 0007. It needs a mapping
+    from ledger profile alias to llama-swap model ID, and it must reconcile its
+    gauge-mean criteria with the counter advice in its notes.
   - 0006: the VM deployment.
-- Next: 0004 or 0007 (both depend only on 0003), or the rest of roadmap unit 2
-  once the scaffold's Phase 1 lands.
+- Next: 0005 (unblocked) or 0004, or the rest of roadmap unit 2 once the
+  scaffold's Phase 1 lands.
 
 <!-- agentic-scaffold:standing-rules:start -->
 

@@ -30,7 +30,10 @@ llama-swap, so the join key is model plus time window.
   VictoriaMetrics for that window and that run's `model_id`, and fills:
   - `server_decode_tps`: mean of `llamacpp_predicted_tokens_seconds`.
   - `server_prefill_tps`: mean of `llamacpp_prompt_tokens_seconds`.
-  - `server_ctx_high_water`: max of `llamacpp_n_tokens_max`.
+  - `server_ctx_high_water`: max of `llamacpp_n_tokens_max_total` (stored with
+    `_total` because llama.cpp declares it a counter; observed 2026-10-21, 0007).
+    Open question: it is the largest `n_tokens` since the server started, so a
+    window max can include earlier runs on the same loaded model.
   - `server_prompt_tokens`, `server_predicted_tokens`: increase of the two
     `_total` counters over the window.
   - `server_deferred_max`: max of `llamacpp_requests_deferred`.
@@ -73,6 +76,17 @@ llama-swap, so the join key is model plus time window.
   profile aliases such as `local-qwen38-flash-next`, while llama-swap model IDs
   look like `qwen3.8-flash-next-unsloth-q8_0`, and quants have changed since
   those runs. So the mapping is required, and this spec must say where it lives.
+  The label's values come from the inference host agent's untracked
+  `targets.json` (0007), one `model_id` per model server port.
+- **Open question, throughput gauges are per scrape window.** The criteria above
+  average the gauges; reconcile that with this note before `/plan`. llama.cpp resets its
+  `prompt_tokens_seconds`, `predicted_tokens_seconds` and
+  `n_busy_slots_per_decode` buckets on every `/metrics` call (0007, recorded in
+  `collector/README.md`). Each sample averages the 30 s since the agent's
+  previous scrape, so a run's throughput should come from the counters
+  (`llamacpp_prompt_tokens_total` over `llamacpp_prompt_seconds_total`, and
+  `llamacpp_tokens_predicted_total` over
+  `llamacpp_tokens_predicted_seconds_total`), not from averaging the gauges.
 - **Risk: concurrent runs.** One run at a time on the server keeps windows
   unambiguous (`analysis/README.md`). `overlap` makes a violation visible rather
   than averaged.

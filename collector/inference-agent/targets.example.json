@@ -1,0 +1,16 @@
+[
+  {
+    "targets": ["127.0.0.1:65001"],
+    "labels": {
+      "model_id": "qwen3.8-flash-next-unsloth-q8_0",
+      "__metrics_path__": "/metrics/prometheus"
+    }
+  },
+  {
+    "targets": ["127.0.0.1:65002"],
+    "labels": {
+      "model_id": "qwen3.8-27b-ud-q8_k_xl",
+      "__metrics_path__": "/metrics"
+    }
+  }
+]

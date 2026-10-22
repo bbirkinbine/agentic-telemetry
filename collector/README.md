@@ -1,8 +1,9 @@
 # Telemetry stack: the source-agnostic collector
 
-> Status, 2026-10-21: the stack runs on the Mac under Docker Desktop (spec 0003)
-> and passed a live smoke test. It has not yet been deployed to the VM (spec
-> 0006). See *Verification* at the end.
+> Status, 2026-10-21: the stack runs on the Mac under OrbStack, a
+> Docker-compatible runtime (spec 0003), and passed a live smoke test. Per-model server metrics come from an agent on
+> the inference host (spec 0007, `inference-agent/`). The stack has not yet been
+> deployed to the VM (spec 0006). See *Verification* at the end.
 
 ## What it is
 
@@ -32,6 +33,10 @@ process that knows where data goes.
                                                                   ▲
                                             existing Grafana VM queries the three stores 
 ```
+
+The model servers behind llama-swap are not in the diagram's scrape path. An
+agent on the inference host scrapes each one on its own port and sends the
+samples to the Collector as OTLP on 4318 (*Inference host agent*).
 
 ## VM
 
@@ -72,9 +77,11 @@ either. Checked 2026-10-21 with `docker buildx imagetools inspect`.
 | `ghcr.io/open-telemetry/opentelemetry-collector-contrib/telemetrygen` | `v0.163.0` | `sha256:569b79a39f8313db839a727e8eac161c66b8a6c2e633f2da4ad352ce7b383c23` | `linux/amd64`, `linux/arm64` | 10001 |
 
 To upgrade one, read the new index digest and its users with
-`docker buildx imagetools inspect <image>:<tag>`. Then update all four places
-that pin it:
+`docker buildx imagetools inspect <image>:<tag>`. Then update every place
+that pins it:
 - `compose.yaml`;
+- for the Collector, `inference-agent/compose.yaml` too (a test keeps the two
+  image strings identical), then re-copy it to the inference host;
 - this table;
 - the `SPEC_INDEX_DIGESTS` constant in `tests/test_collector_compose.py`;
 - the spec that approved the upgrade.
@@ -86,17 +93,32 @@ the `exporter.file.nativeCompression` gate.
 
 What each server behind llama-swap exposes, from the inference host's sysadmin
 agent on 2026-10-21 (llama-swap v264). Names, flags and paths only; addresses
-live in the vault's `ENDPOINTS.md`. Today the stack does not scrape these servers: per-model
-metrics come from a scraper on the inference host (spec 0007), for the reason
-given below. None of these servers attaches a model label, so that scraper must
-add `model_id` itself.
+live in the vault's `ENDPOINTS.md`. The stack's Collector never scrapes these
+servers through llama-swap, for the reason given below. The inference host agent
+(spec 0007) scrapes each one on its own port instead. None of these servers
+attaches a model label, so the agent's targets file adds `model_id`.
 
 | Build | llama-swap model ID | `/metrics` | `/slots` | Prometheus path on the server | `llamacpp:*` names |
 |---|---|---|---|---|---|
-| llama.cpp upstream b11552 | `qwen3.8-27b-ud-q8_k_xl` | Prometheus text, off by default; needs `--metrics` | on by default in this build; `--slots` added | `/metrics` (via llama-swap: `/upstream/qwen3.8-27b-ud-q8_k_xl/metrics`) | not observed on this build yet (needs `--metrics`). Upstream master documents `prompt_tokens_total`, `prompt_seconds_total`, `prompt_tokens_seconds`, `tokens_predicted_total`, `tokens_predicted_seconds_total`, `predicted_tokens_seconds`, `requests_processing`, `requests_deferred`, `n_tokens_max`, `n_decode_total`, `n_busy_slots_per_decode` and four `spec_decode_*` counters (llama.cpp `tools/server/README.md`, MIT, retrieved 2026-10-21) |
+| llama.cpp upstream b11552 | `qwen3.8-27b-ud-q8_k_xl` | Prometheus text, off by default; `--metrics` added 2026-10-21 (spec 0007 D5) | on by default in this build; `--slots` not set | `/metrics` (via llama-swap: `/upstream/qwen3.8-27b-ud-q8_k_xl/metrics`) | observed 2026-10-21 through the inference host agent (stored names): `prompt_tokens_total`, `prompt_tokens_cached_total`, `prompt_seconds_total`, `prompt_tokens_seconds`, `tokens_predicted_total`, `tokens_predicted_seconds_total`, `predicted_tokens_seconds`, `requests_processing`, `requests_deferred`, `n_tokens_max_total` (a counter upstream, so storage adds `_total`), `n_decode_total`, `n_busy_slots_per_decode` and four `spec_decode_*` counters, each with the `llamacpp_` prefix |
 | Strata v0.1.45 | `qwen3.8-flash-next-unsloth-q8_0` | JSON; Prometheus text at `/metrics/prometheus`, built in | built in | `/metrics/prometheus` (via llama-swap: `/upstream/qwen3.8-flash-next-unsloth-q8_0/metrics/prometheus`) | `prompt_tokens_total`, `prompt_tokens_cached_total`, `prompt_seconds_total`, `prompt_tokens_seconds`, `tokens_predicted_total`, `tokens_predicted_seconds_total`, `predicted_tokens_seconds`, `requests_processing`, `requests_deferred`; also `strata:*`. No `n_tokens_max` |
 | Project Maya v1.1.4 | `glm-5.3-flash-maya-l` | JSON only | built in | none; v1.1.5+ adds a partial Prometheus set, still without `n_tokens_max` | none |
 | Sybil (SGLang 0.5.20, exllamav3 1.5.1) | `glm-5.3-flash` | no `llamacpp:*` route | not served | none; needs an exporter | none |
+
+**Coverage** by the inference host agent (spec 0007):
+- Covered: Strata (`/metrics/prometheus`) and llama.cpp (`/metrics`, once the
+  host adds `--metrics`, spec 0007 D5).
+- Left uncovered, not worked around: Project Maya v1.1.4, whose `/metrics` is
+  JSON (v1.1.5+ adds Prometheus), and Sybil, which has no Prometheus route.
+
+**One scraper per llama.cpp server.** Each `/metrics` call resets the server's
+throughput buckets: `prompt_tokens_seconds`, `predicted_tokens_seconds` and
+`n_busy_slots_per_decode` average over the window since the previous call
+(llama.cpp `tools/server/server-context.cpp` at tag `b11552`, the deployed build,
+commit `23b0202a189c44a54625aadcb37a946dd1d6278d`, MIT, retrieved 2026-10-21:
+https://github.com/ggml-org/llama.cpp/blob/b11552/tools/server/server-context.cpp).
+A second scraper, such as an ad-hoc `curl`, shortens the agent's next window.
+The counters are unaffected.
 
 llama-swap's own `/metrics` serves system and GPU telemetry only, never
 `llamacpp:*`. It returns 503 while `performance.disabled: true`; the host set it to
@@ -127,8 +149,8 @@ with the same receiver and OTLP path as the stack:
   `llamacpp_prompt_tokens_seconds`, `llamacpp_tokens_predicted_total`,
   `llamacpp_tokens_predicted_seconds_total`, `llamacpp_predicted_tokens_seconds`,
   `llamacpp_requests_processing` and `llamacpp_requests_deferred`.
-- Label keys are `model_id` (added by the temporary capture's scrape job; 0007's
-  scraper must add the same), `service_name` (the job name), `server_address`, `server_port`, `url_scheme`, `service_instance_id`,
+- Label keys are `model_id` (added by the temporary capture's scrape job; the
+  agent's targets file adds the same), `service_name` (the job name), `server_address`, `server_port`, `url_scheme`, `service_instance_id`,
   `scope_name` and `scope_version`. The stack's `resource` processor also adds
   `deployment_environment`.
 - `server_address` holds the real host. Keep it out of anything tracked.
@@ -142,13 +164,14 @@ with the same receiver and OTLP path as the stack:
   swap and load waits this stack exists to observe.
 
 So the Collector scrapes only llama-swap's own `/metrics`. Per-model `llamacpp:*`
-metrics come from a scraper on the inference host that reads each server's own
-port, which llama-swap never sees (spec 0007). Per-model metrics exist only while
-a model is loaded; when it unloads, its port is closed.
+metrics come from the inference host agent, which reads each server's own port,
+so llama-swap never sees the requests and the TTL is untouched (spec 0007).
+Per-model metrics exist only while a model is loaded; when it unloads, its port
+is closed and the agent's `up` for it drops to 0.
 
 ## Run locally on the Mac
 
-The same `compose.yaml` runs under Docker Desktop on the Mac (spec 0003) and on the
+The same `compose.yaml` runs under OrbStack on the Mac (spec 0003) and on the
 telemetry VM (spec 0006). Only the untracked `.env` differs.
 
 1. Create `.env` from the tracked template, then set the three values:
@@ -157,22 +180,33 @@ telemetry VM (spec 0006). Only the untracked `.env` differs.
    cp env.example .env
    ```
 
-   - `TELEMETRY_ROOT`: the data root. On the Mac it must sit under a path Docker
-     Desktop shares.
+   - `TELEMETRY_ROOT`: the data root. On the Mac it must sit under a path OrbStack
+     shares.
    - `LLAMA_SWAP_TARGET`: `host:port` of the llama-swap gateway, from the vault's
      `ENDPOINTS.md`.
-   - `TELEMETRY_BIND_ADDR`: `127.0.0.1` on the Mac, so nothing is published on
-     whatever network the laptop joins. The VM uses its LAN or Tailnet address.
+   - `TELEMETRY_BIND_ADDR`: the address every published port binds to.
+     - `0.0.0.0` on the home network, so the inference host agent can reach the
+       Collector (spec 0007, D1). The macOS firewall, if on, must allow
+       incoming connections for OrbStack, the Mac's Docker runtime.
+     - `127.0.0.1` anywhere else, or stop the stack before leaving home: with
+       `0.0.0.0` the stores and OTLP intake are open on any network the laptop
+       joins, including VictoriaMetrics' unauthenticated admin API. A laptop
+       that sleeps at home and wakes elsewhere resumes the stack as it was.
+       The agent queues on disk until the Mac is back.
+     - To see what is open away from home, `lsof -nP -iTCP:4318 -iTCP:8428
+       -sTCP:LISTEN`: a `*:` address means all interfaces, so run
+       `docker compose stop`.
+     - The VM uses its LAN or Tailnet address (spec 0006).
 
    Compose stops with `set <NAME> in collector/.env` when one is missing.
 2. Create the data root. Write `root` out as an absolute path. Compose expands
    `$HOME` inside `.env`, but a value pasted into the shell in single quotes is
    not expanded, so the folders would land in a literal `$HOME/` directory under
-   the current one. The steps differ by host, because Docker Desktop and Docker on
+   the current one. The steps differ by host, because the Mac runtime and Docker on
    Linux treat bind-mount ownership differently:
 
-   - **Mac (Docker Desktop).** Create the folders as yourself and change no
-     owners. Docker Desktop's file sharing writes as your macOS user, so the
+   - **Mac (OrbStack).** Create the folders as yourself and change no
+     owners. OrbStack's file sharing writes as your macOS user, so the
      containers can write to folders you own. This is how the live run's data
      root was made. A folder chowned to UID 10001 may become unwritable through
      file sharing.
@@ -235,6 +269,115 @@ telemetry VM (spec 0006). Only the untracked `.env` differs.
    Never delete the data root to "reset" the stack. The archive under it is the
    record.
 
+## Inference host agent (spec 0007)
+
+`inference-agent/` holds a second, small Collector that runs on the inference
+host, not with the stack. Every 30 s it scrapes each model server on that
+server's own local port, labels the samples with the llama-swap `model_id`, and
+sends them as OTLP to the stack's Collector. llama-swap never sees these
+requests, so model TTLs are untouched. Its sending queue is on disk and retries
+without a time limit, so samples taken while the stack is unreachable (the Mac
+asleep or away) are delivered when it returns.
+
+| File | On the inference host |
+|---|---|
+| `compose.yaml` | the install directory, as is. Same Collector image as the stack, host networking, no published ports |
+| `otel-agent.yaml` | next to `compose.yaml`, as is |
+| `env.example` | template for `.env` next to `compose.yaml` |
+| `targets.example.json` | template for `targets.json` in the targets directory |
+
+Prerequisites on the inference host, applied by its sysadmin:
+- Docker Engine with the Compose v2 plugin (spec 0007 D4), from the same package
+  source as the engine;
+- `--metrics` on the llama.cpp server's command line (D5); Strata serves
+  `/metrics/prometheus` without a flag;
+- `127.0.0.1:13133` (health) and `127.0.0.1:8888` (the agent's own metrics)
+  free, because host networking shares the host's ports.
+
+Install:
+
+1. Create an install directory on the inference host that the copying user
+   owns, then copy the four files from `collector/inference-agent/` (not
+   `collector/`, which has its own `compose.yaml` and `env.example`) straight
+   into it:
+
+   ```bash
+   cd collector/inference-agent
+   ssh -t gpu.example 'sudo mkdir -p /opt/agentic-telemetry/inference-agent &&
+     sudo chown "$USER" /opt/agentic-telemetry/inference-agent'
+   scp compose.yaml otel-agent.yaml env.example targets.example.json \
+     gpu.example:/opt/agentic-telemetry/inference-agent/
+   ```
+
+   The repo is not cloned there, so any later change to a tracked file needs a
+   re-copy. After re-copying `otel-agent.yaml`, run
+   `docker compose up -d --force-recreate`: the Collector does not reload its
+   config, compose does not see a changed mounted file, and a copy that
+   replaces the file's inode is invisible to the running container's
+   single-file mount.
+
+2. In the install directory, `cp env.example .env` and set:
+   - `TELEMETRY_OTLP_ENDPOINT`: the stack's OTLP/HTTP address. While the stack
+     runs on the Mac, the Mac's current LAN address, from `ENDPOINTS.md`. Not
+     its `.local` name: the agent is a static Go binary that cannot resolve
+     mDNS, even where the host can. If the Mac's address changes, update this
+     value and run `docker compose up -d`; the queue holds samples meanwhile.
+     Spec 0006 repoints it to the VM.
+   - `AGENT_QUEUE_DIR` and `AGENT_TARGETS_DIR`: keep the example paths unless the
+     host needs others.
+3. Create the queue and targets directories. The image runs as UID 10001:
+
+   ```bash
+   sudo mkdir -p /var/lib/agentic-telemetry/queue /etc/agentic-telemetry/targets
+   sudo chown 10001:10001 /var/lib/agentic-telemetry/queue
+   sudo chmod 0700 /var/lib/agentic-telemetry/queue
+   sudo chmod 0755 /etc/agentic-telemetry/targets
+   ```
+
+4. Write `/etc/agentic-telemetry/targets/targets.json` from `targets.example.json`,
+   readable by UID 10001 (`sudo chmod 0644`). An unreadable directory or file
+   gives the agent zero targets with no error. Write one entry per
+   Prometheus-capable model server, with its real local port, its llama-swap
+   `model_id` and its `__metrics_path__`. The example's ports, 65001 and 65002,
+   are placeholders; the real ones are in the vault's `ENDPOINTS.md`.
+   - Every entry is a model server's own port: never llama-swap's port, and never
+     a `__metrics_path__` containing `/upstream/`, which would reset that
+     model's TTL on every scrape.
+   - Never copy `targets.example.json` itself into the targets directory: the
+     agent scrapes every `*.json` there.
+   - Editing `targets.json` later needs no restart; the agent re-reads the
+     directory.
+5. Start it and check health. The health check should print 200:
+
+   ```bash
+   docker compose up -d
+   curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:13133
+   ```
+
+6. Check delivery a minute later. Health only says the process is up; a wrong
+   or unresolvable `TELEMETRY_OTLP_ENDPOINT` still reports 200 while the queue
+   fills:
+
+   ```bash
+   curl -s http://127.0.0.1:8888/metrics |
+     grep -E '^otelcol_exporter_(sent_metric_points|queue_size)'
+   docker compose logs --since 2m otel-agent | grep -E 'no such host|Exporting failed'
+   ```
+
+   Delivering: `otelcol_exporter_sent_metric_points` is present and rising, and
+   `otelcol_exporter_queue_size` stays near 0. Not delivering: no sent-points
+   line, a queue size that grows each scrape, and `no such host` or `Exporting
+   failed` in the log. Retries never stop, so no "failed points" counter
+   appears. Names checked on 0.163.1, 2026-10-21.
+
+Checks, with VictoriaMetrics on the stack. `nocache=1` keeps VictoriaMetrics'
+rollup cache from hiding samples that arrived late from the queue:
+- With a model loaded: `count by (__name__, model_id)({__name__=~"llamacpp_.*"})`
+  lists that model's series, and `up{service_name="inference-models"}` is 1 for it.
+- After the model's `ttl` passes idle: llama-swap unloads it as before, its `up`
+  drops to 0, and nothing loads it again.
+- llama-swap's access log shows no requests from the agent.
+
 ## Pipelines (otel-collector.yaml)
 
 Three pipelines, one per signal, all with the same processor chain:
@@ -272,7 +415,7 @@ archive into the new store.
 | Delegate runner | none live | `ledger.jsonl`, `results/<run>/result.json`, session JSONL | arrives via the landing zone |
 | Scaffold tool-call ledger (Phase 1, all clients) | landing zone | one JSON line per tool call | `scripts/ship-ledgers.sh` (to write) rsyncs `.agentic/telemetry/*.jsonl` and `.agentic/delegate/` from each project to `landing/<host>/<project>/` |
 | llama-swap gateway | Collector scrapes the gateway's own `/metrics` | system and GPU metrics | `performance.disabled: false` in the llama-swap config. Never scrape `/upstream/…` through it (see *Inference server endpoints*) |
-| llama.cpp-style servers behind llama-swap | a scraper on the inference host (spec 0007) | `llamacpp:*` prompt/predicted token counters, tokens/s, `requests_deferred`, `n_tokens_max` where the build has it | start each upstream with `--metrics`. Per-request lines from llama-swap `/logs/stream/http` are not captured yet |
+| llama.cpp-style servers behind llama-swap | the inference host agent scrapes each server's own port and sends OTLP to `:4318` (spec 0007) | `llamacpp:*` prompt/predicted token counters, tokens/s, `requests_deferred`, `n_tokens_max` where the build has it | each server's Prometheus route on (llama.cpp: `--metrics`), and a line per model in the agent's `targets.json`. Per-request lines from llama-swap `/logs/stream/http` are not captured yet |
 | Your own Python agents | OTLP from the OTel SDK | GenAI spans + metrics | `OTEL_EXPORTER_OTLP_ENDPOINT=http://telemetry.example:4318` |
 | Anything else | drop JSONL in `landing/<source>/` | logs | the `filelog` receiver tails it; each line becomes one log record with `source` from the path |
 
@@ -360,12 +503,14 @@ Validated today with the pinned images, on the Mac, via Docker:
   - `loki-config.yaml` reports "config is valid" on both entries of the 3.7.9 index.
   - The amd64 runs use the index's amd64 manifest digest (`docker buildx
     imagetools inspect <index> --raw`) under emulation, and the container reports
-    `amd64`. Docker Desktop's classic image store holds one platform per
+    `amd64`. The Mac runtime's image store holds one platform per
     reference, so `--platform linux/amd64` on the index digest itself fails with
     "cannot overwrite digest".
   - `docker compose --env-file env.example config --quiet` passes. Without a
     `.env`, compose stops and names each missing variable.
-- Live run on the Mac, 2026-10-21 (spec 0003), Docker Desktop on arm64:
+- Live run on the Mac, 2026-10-21 (spec 0003), OrbStack on arm64. Spec 0003
+  and earlier revisions of this README say Docker Desktop; the runtime was
+  OrbStack throughout:
   - **Tempo mount.** Tempo would not start: in the image, `/tempo` is the tempo
     binary, so the data directory cannot be mounted there. It now mounts at
     `/var/tempo`, and `tempo.yaml` stores blocks and WAL under `/var/tempo`. After
@@ -403,7 +548,83 @@ Validated today with the pinned images, on the Mac, via Docker:
   - `docker compose --env-file env.example config --quiet` passes on the final
     `compose.yaml` (Tempo mount, feature gate).
 
+- Inference host agent, spec 0007, on the Mac, 2026-10-21:
+  - `inference-agent/otel-agent.yaml` passes `otelcol-contrib validate` on the
+    `linux/arm64` and `linux/amd64` entries of the 0.163.1 index (amd64 by its
+    manifest digest, under emulation; the container reports `amd64`). A
+    placeholder `TELEMETRY_OTLP_ENDPOINT` is passed in.
+  - `docker compose -f inference-agent/compose.yaml --env-file
+    inference-agent/env.example config --quiet` passes, including the log cap.
+  - **E1, file-based discovery.** The tracked agent config ran against two fake
+    local endpoints and the Mac stack's Collector. It used a scratch targets
+    directory: one target with `__metrics_path__=/metrics/prometheus` (that
+    endpoint answers 404 on `/metrics`), one with no path label, and one
+    closed port.
+    - VictoriaMetrics held both test series, each with its `model_id`.
+    - `up` was 1, 1 and 0. The closed port logs one warning per scrape, and
+      the agent keeps running.
+    - No `__metrics_path__` label is stored.
+    - A target added by editing `targets.json` in place was scraped 36 s later,
+      and one added by an atomic rename 31 s later, both without a restart.
+  - **E2, disk queue.** The stack's Collector was stopped for 5 minutes, and the
+    agent was restarted once in the middle of it. Every 30 s sample from the
+    outage reached VictoriaMetrics after the Collector came back, with no gap
+    over 45 s. That includes the requests in flight at the restart.
+    - The agent logs "Exporting failed. Dropping data." with `interrupted due to
+      shutdown` for those requests, but the persistent queue keeps them and
+      re-sends them.
+    - The test series (`exp_*`) remain in the Mac stores and archive. They are
+      throwaway data from this run.
+- Re-validated 2026-10-21 after the spec 0007 review fixes (spec 0007 D6):
+  - `inference-agent/otel-agent.yaml`, with the `/upstream/` drop rule and the
+    comment fixes, passes `otelcol-contrib validate` on the arm64 and amd64
+    entries of the 0.163.1 index.
+  - Both compose files pass `config --quiet` with their `env.example`. The stack
+    compose change is a header comment only.
+  - **Drop rule, live.** An agent with one target on `/metrics/prometheus` and
+    one with `__metrics_path__=/upstream/exp/metrics` scraped only the first.
+    The fake server saw no request for the second, and it has no `up` series.
+  - **Delivery metrics.** On 0.163.1 the agent's internal metrics on
+    `127.0.0.1:8888` include `otelcol_exporter_sent_metric_points` and
+    `otelcol_exporter_queue_size`. With an unresolvable endpoint, the log shows
+    `no such host`, the queue size grows, and no sent-points line appears. With
+    a working endpoint, sent points rise and the queue size stays at 0.
+
+- Inference host agent live, 2026-10-21 (spec 0007):
+  - **Install**, done by the inference host's sysadmin agent from the four
+    copied files, with neither config edited:
+    - Compose v2 plugin `docker-compose-v2` 2.40.3, from the same Ubuntu source
+      as Docker Engine 29.1.3;
+    - `--metrics` added to the llama.cpp unit and nothing else changed;
+    - the container runs `amd64` from the pinned index digest, as UID 10001,
+      with host networking;
+    - its listeners are `127.0.0.1:13133` and `127.0.0.1:8888` only;
+    - the queue directory is 0700 and owned by 10001, and `targets.json` is
+      0644, the only JSON file in its directory, with two entries (Strata and
+      llama.cpp) on each server's own port.
+  - **Delivery.** Sent metric points rose (10, 20, then 140) with the queue at
+    0 and no export errors. The Mac's VictoriaMetrics held
+    `up{service_name="inference-models"}` for both `model_id`s, at 0 while both
+    models were unloaded. Each closed port logs one warning per scrape.
+  - **No side effects.** No model loaded from the agent's scrapes, and
+    llama-swap's access log shows no agent requests.
+  - **Loaded model.** The owner loaded `qwen3.8-27b-ud-q8_k_xl` with a normal
+    request. Its `up` went from 0 to 1 on the first scrape after it was ready.
+    VictoriaMetrics then held 16 `llamacpp_*` series with that `model_id` (names
+    in *Inference server endpoints*), and `llamacpp_prompt_tokens_total` was
+    above 0. Label keys: `model_id`, `service_name`, `server_port`, `url_scheme`,
+    `service_instance_id`, `scope_name`, `scope_version`,
+    `deployment_environment`.
+  - **Idle unload.**
+    - The inference host's watcher: after the last request, llama-swap unloaded
+      the model 920 s later. That is the 900 s `ttl` within the watcher's
+      polling tolerance.
+    - The model stayed unloaded for the whole 1,813 s watch, and the watcher
+      loaded nothing.
+    - On the stack: the agent's `up` for that model dropped to 0 on the first
+      scrape after the unload, and stayed 0 for all 62 scrapes of the next 31
+      minutes. Its `llamacpp_*` series ended at the unload.
+
 Not yet done:
-- per-model `llamacpp:*` scraping (spec 0007);
 - the VM deployment (spec 0006);
 - the Codex `[otel]` exporter syntax.

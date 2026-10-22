@@ -1,0 +1,35 @@
+# Inference host agent (spec 0007): one OTel Collector that scrapes each model
+# server on its own local port and forwards the samples to the telemetry stack.
+# Runs on the inference host, not with the stack. Host values come from the
+# untracked .env next to this file (template: env.example).
+#
+# The image is byte-identical to the stack's otel-collector image in
+# ../compose.yaml (a test checks this). The digest is the multi-arch index, so
+# an amd64 inference host pulls the amd64 build of the same release.
+#
+# Validate (see ../README.md -> Verification):
+#   docker run --rm -e TELEMETRY_OTLP_ENDPOINT=http://telemetry.example:4318 \
+#     -v "$PWD/otel-agent.yaml:/c.yaml:ro" <image> validate --config=/c.yaml
+services:
+  otel-agent:
+    image: otel/opentelemetry-collector-contrib:0.163.1@sha256:1175b03003053962012f5a231f5567f66a3e8fdb960c7835c0e48f7aa1555806
+    command: ["--config=/etc/otelcol/config.yaml"]
+    restart: unless-stopped
+    # An unloaded model's closed port logs one warning per scrape; cap the log.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # Host networking reaches model servers bound to the host's loopback. The
+    # agent's own listeners (health 13133, internal metrics 8888) bind 127.0.0.1.
+    network_mode: host
+    environment:
+      TELEMETRY_OTLP_ENDPOINT: ${TELEMETRY_OTLP_ENDPOINT:?set TELEMETRY_OTLP_ENDPOINT in .env next to this file}
+    volumes:
+      - ./otel-agent.yaml:/etc/otelcol/config.yaml:ro
+      # The directory, not one file: an editor's atomic rename replaces the file's
+      # inode, which a single-file bind mount would never see.
+      - ${AGENT_TARGETS_DIR:?set AGENT_TARGETS_DIR in .env next to this file}:/etc/otelcol/targets:ro
+      # Disk-backed sending queue; owned by UID 10001, the image's user.
+      - ${AGENT_QUEUE_DIR:?set AGENT_QUEUE_DIR in .env next to this file}:/var/lib/otelcol/queue

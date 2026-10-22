@@ -1,8 +1,10 @@
 # Telemetry stack: the same file runs on the Mac (spec 0003) and on the telemetry
 # VM (spec 0006). Host-specific values come only from the untracked collector/.env
 # (start from env.example); compose stops with the named variable if one is unset.
-# Ports bind to TELEMETRY_BIND_ADDR: 127.0.0.1 on the Mac, the VM's LAN or Tailnet
-# address there. Grafana runs on the existing monitoring VM and queries the stores.
+# Ports bind to TELEMETRY_BIND_ADDR: on the Mac, 0.0.0.0 on the home network so the
+# inference host agent can reach the Collector (spec 0007) and 127.0.0.1 elsewhere;
+# on the VM, its LAN or Tailnet address. Grafana runs on the existing monitoring VM
+# and queries the stores.
 #
 # Images are pinned by multi-arch index digest, so the Mac (linux/arm64) and an x86
 # Ubuntu host (linux/amd64) run the same release. Digests checked 2026-10-21 with

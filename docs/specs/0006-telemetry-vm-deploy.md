@@ -36,6 +36,12 @@ scraping, holds the archive, and is backed up.
 - `ship-ledgers.sh` runs from launchd on the Mac every 15 minutes against the
   VM. After one cycle, the VM landing zone matches the Mac's evidence. With the VM
   unreachable, the job exits 0 and the next cycle catches up.
+- The inference host agent (0007) is repointed to the VM: its
+  `TELEMETRY_OTLP_ENDPOINT` in the inference host's `.env` becomes the VM's
+  OTLP/HTTP address, and `up{service_name="inference-models"}` appears in the VM's
+  VictoriaMetrics. The Mac's `collector/.env` then goes back to
+  `TELEMETRY_BIND_ADDR=127.0.0.1` (0007 D1 applied only while the stack ran on the
+  Mac).
 - The three data sources (VictoriaMetrics, Loki, Tempo) are added to the existing
   Grafana on the monitoring VM. A query from Grafana returns the synthetic metric.
 - Backups:
