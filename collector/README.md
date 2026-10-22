@@ -3,7 +3,9 @@
 > Status, 2026-10-22: the stack runs on the telemetry VM (spec 0006) and passed
 > its bring-up checks on the LAN. Per-model server metrics come from an agent on the inference
 > host (spec 0007, `inference-agent/`). The Mac's copy under OrbStack (spec 0003)
-> is stopped and kept as a test bed on `127.0.0.1`. See *Verification* at the end.
+> is stopped and kept as a test bed on `127.0.0.1`. The `captures-pull` service
+> keeps every local-model request and response llama-swap captures (spec 0008,
+> *Local-model captures*). See *Verification* at the end.
 
 ## What it is
 
@@ -47,8 +49,8 @@ samples to the Collector as OTLP on 4318 (*Inference host agent*).
 | Size | 4 vCPU, 8 GB RAM, 250 GB thin disk on node-local NVMe | single-developer volume is tiny; disk is the only thing that grows |
 | Provisioning | the owner's homelab repository: an OpenTofu role clones the VM from the lab's Ubuntu template; an Ansible role installs Docker, puts the admin user in the `docker` group, creates `/srv/telemetry` with the ownership in *Run locally on the Mac*, and caps container logs (`json-file`, 3 × 50 MB) | provisioning code stays out of this repository (0006, Non-goals); `compose.yaml` sets no logging limits and the data root shares `/` with the OS |
 | Network | ports published on the VM's LAN IP only (DHCP reservation); no Tailscale on the VM: Tailnet clients reach it through the existing subnet router; no public exposure | same policy as the inference gateway in `ENDPOINTS.md`; one address avoids a Tailnet IP failing to bind before `tailscaled` starts (0006) |
-| Storage | `/srv/telemetry/{archive,landing,collector-state,victoria,loki,tempo}`, a directory on the root filesystem | archive can be an NFS mount from the NAS |
-| Backup | none yet: PBS for the VM and a copy of `archive/` to the NAS (shown here as `nas.example`) are planned, outside spec 0006 | the archive is the irreplaceable part |
+| Storage | `/srv/telemetry/{archive,landing,collector-state,victoria,loki,tempo,captures}`, a directory on the root filesystem | archive can be an NFS mount from the NAS |
+| Backup | Proxmox Backup Server backs up the VM daily, managed from the homelab repository, not here; a copy of `archive/` to the NAS (shown here as `nas.example`) is still planned | the archive and `captures/` are the irreplaceable parts |
 
 ## Services (compose.yaml)
 
@@ -58,13 +60,15 @@ samples to the Collector as OTLP on 4318 (*Inference host agent*).
 | `victoriametrics` | `victoriametrics/victoria-metrics` | 8428 | `-retentionPeriod=5y` | metrics. Accepts OTLP natively at `/opentelemetry/v1/metrics`; Prometheus-compatible query API for Grafana |
 | `loki` | `grafana/loki` | 3100 | 730 days via compactor | logs and events. Accepts OTLP natively at `/otlp` |
 | `tempo` | `grafana/tempo` | 3200, 4317 internal | 90 days | traces. Optional; only Claude Code beta tracing and your own apps emit traces today |
+| `captures-pull` | built from `captures/Dockerfile` | none | forever, for now | copies llama-swap's per-call request/response captures into `captures/<label>/` (spec 0008, *Local-model captures*) |
 
 Grafana is **not** run here. Add three data sources to the existing Grafana on
 the monitoring VM: VictoriaMetrics (Prometheus type), Loki, Tempo.
 
 ## Images
 
-Every image in `compose.yaml` is pinned as `tag@sha256:<index digest>`. An index
+Every image in `compose.yaml`, and each base image `captures/Dockerfile` pulls,
+is pinned as `tag@sha256:<index digest>`. An index
 digest names one multi-arch manifest: the Mac pulls its `linux/arm64` entry, an x86
 Ubuntu host pulls its `linux/amd64` entry, and a re-pushed tag cannot change
 either. Checked 2026-10-21 with `docker buildx imagetools inspect`.
@@ -76,6 +80,8 @@ either. Checked 2026-10-21 with `docker buildx imagetools inspect`.
 | `grafana/loki` | `3.7.9` | `sha256:0db216b630ae1f348a1584c67f3cead8b4c1fc839169a39501db664744158e28` | `linux/amd64`, `linux/arm64` | 10001 |
 | `grafana/tempo` | `2.10.10` | `sha256:12b0820f13ffa10ce956b6e9acc3b03f3cffded99109be6cc09d106fe56e5d38` | `linux/amd64`, `linux/arm64` | 10001 |
 | `ghcr.io/open-telemetry/opentelemetry-collector-contrib/telemetrygen` | `v0.163.0` | `sha256:569b79a39f8313db839a727e8eac161c66b8a6c2e633f2da4ad352ce7b383c23` | `linux/amd64`, `linux/arm64` | 10001 |
+| `python` (base of `captures/Dockerfile`, 2026-10-22) | `3.12-slim-bookworm` | `sha256:6a0e06f5ba0b373d051aabd3fffb9b873f27f9a2a3a14bcbe37dee6f0e3bbc70` | `linux/amd64`, `linux/arm64` | 10001 (the Dockerfile's `USER`; the base runs as root) |
+| `ghcr.io/astral-sh/uv` (build stage of `captures/Dockerfile`, 2026-10-22; 0.11.x matches `uv_build>=0.11,<0.12`) | `0.11.33` | `sha256:77280f2f771df71f90786c314fe1bbc1e023feac652969bbf139c280babf2eb7` | `linux/amd64`, `linux/arm64` | none at run time: only its `uv` binary is copied in |
 
 To upgrade one, read the new index digest and its users with
 `docker buildx imagetools inspect <image>:<tag>`. Then update every place
@@ -84,7 +90,8 @@ that pins it:
 - for the Collector, `inference-agent/compose.yaml` too (a test keeps the two
   image strings identical), then re-copy it to the inference host;
 - this table;
-- the `SPEC_INDEX_DIGESTS` constant in `tests/test_collector_compose.py`;
+- the `SPEC_INDEX_DIGESTS` constant in `tests/test_collector_compose.py` (for the
+  harvester's bases, `captures/Dockerfile` and `DOCKERFILE_IMAGES` there);
 - the spec that approved the upgrade.
 
 Re-run the validators in *Verification*. If the Collector changes, also re-check
@@ -195,6 +202,10 @@ telemetry VM (spec 0006). Only the untracked `.env` differs.
        `*:` address means all interfaces.
      - The VM uses its LAN address; the Tailnet reaches it through the subnet
        router (spec 0006).
+   - `COMPOSE_PROFILES` and `CAPTURES_HOST_LABEL` (spec 0008): on the Mac
+     test bed, delete both lines. With the `captures` profile on, `up -d`
+     would start a second capture harvester against the same llama-swap. The
+     VM keeps them (*Local-model captures* → Deploy).
 
    Compose stops with `set <NAME> in collector/.env` when one is missing.
 2. Create the data root. Write `root` out as an absolute path. Compose expands
@@ -211,7 +222,7 @@ telemetry VM (spec 0006). Only the untracked `.env` differs.
 
      ```bash
      root=/path/from/TELEMETRY_ROOT
-     mkdir -p "$root"/{archive,landing,collector-state,victoria,loki,tempo}
+     mkdir -p "$root"/{archive,landing,collector-state,victoria,loki,tempo,captures}
      ```
 
    - **Linux (the telemetry VM, spec 0006).** The Collector, Loki and Tempo run
@@ -221,8 +232,8 @@ telemetry VM (spec 0006). Only the untracked `.env` differs.
 
      ```bash
      root=/path/from/TELEMETRY_ROOT
-     sudo mkdir -p "$root"/{archive,landing,collector-state,victoria,loki,tempo}
-     sudo chown 10001:10001 "$root"/archive "$root"/collector-state "$root"/loki "$root"/tempo
+     sudo mkdir -p "$root"/{archive,landing,collector-state,victoria,loki,tempo,captures}
+     sudo chown 10001:10001 "$root"/archive "$root"/collector-state "$root"/loki "$root"/tempo "$root"/captures
      sudo chown "$USER" "$root"/landing && sudo chmod 0755 "$root"/landing
      ```
 
@@ -376,6 +387,120 @@ rollup cache from hiding samples that arrived late from the queue:
   drops to 0, and nothing loads it again.
 - llama-swap's access log shows no requests from the agent.
 
+## Local-model captures (spec 0008)
+
+llama-swap already keeps a request/response capture of each call it proxies, but
+only in a size-bounded in-memory cache that evicts the oldest first. The
+`captures-pull` service copies every call into files before that happens, so a
+local-model session can be read turn by turn as the model saw it: the system
+prompt and tools the client sent, the history it re-sent, the sampling settings,
+and the raw response. Facts below are from llama-swap v264 (MIT), read 2026-10-22
+(spec 0008, *Step 0 results*).
+
+**llama-swap settings** (an owner change on the inference host, through its
+sysadmin agent; restart llama-swap while idle, since a restart unloads models):
+
+- `captureBuffer: 1024` (MB). The harvester drains the cache every 15 s, so the
+  buffer only has to cover a harvester outage (a VM reboot, a day of
+  maintenance). Resize it from the measured `evicted` count.
+- `store.path`: a file on persistent local disk. Without it the activity list
+  keeps only the newest `metricsMaxInMemory` rows (default 1000), so a long
+  outage would drop rows whose captures were still cached, and a restart resets
+  row ids. With it, every row and its id survive a restart. The file grows
+  without bound on the inference host; pruning it is decided with capture
+  retention.
+
+**What is and is not captured.** Every call through llama-swap's own port, for
+every backend behind it. A client that calls a model server's own port bypasses
+llama-swap and is not captured. A failed (non-200) call keeps everything but its
+response body; a client disconnect or an empty response keeps no capture at all.
+llama-swap itself replaces the values of `authorization`, `proxy-authorization`,
+`cookie`, `set-cookie` and `x-api-key` with `[REDACTED]`; v264 has no setting to
+turn that off. Nothing else is redacted: bodies, other headers and `src` (the
+client address) are kept as served.
+
+**Files.** One JSON line per call in `captures/<label>/<YYYY-MM-DD>.jsonl.zst`
+under `TELEMETRY_ROOT`, named by the UTC date the call ended:
+`{"activity", "capture", "capture_status", "harvested_at", "epoch"}` (plus
+`estimated_end` on a malformed row), with the
+activity row and the capture exactly as llama-swap served them (bodies stay
+base64). Every 100 rows, and at the end of each poll, the harvester appends one
+checksummed zstd frame per daily file and fsyncs it before
+`captures/<label>/cursor.json` moves, so a crash repeats rows (readers drop them)
+and never skips one. The Collector neither mounts nor tails these files, so they
+never reach Loki; PBS's daily VM backup covers them. A failed append is
+truncated back; a frame torn anyway (a hard kill, a copy taken mid-append) is
+skipped by `captures show` with a warning naming the file.
+
+**Counts.** Each poll that saved or lost anything logs
+`poll: rows=N saved=S evicted=E no_capture=K id_reset=0|1`, plus `error=N` when a
+capture failed (not with a 404) on 3 polls in a row and was saved without it
+(`capture_status: "error"`), or an activity row would not parse on 3 polls and
+was saved as served with an `estimated_end` from its neighbours. An
+unreachable llama-swap never counts toward that. The 3 polls are counted within
+one harvester process: a restart, or each `--once` run, starts the count over,
+so a stuck capture or a malformed row never passes under `--once`. A quiet harvester logs a heartbeat every 40
+polls. A poll writes and moves the cursor every 100 rows, so a backlog after an
+outage never sits in memory whole. llama-swap lists a call a moment before it
+stores the capture, so a recent clean call listed without one is fetched anyway. `evicted` is a call whose capture was listed but
+gone by the time it was fetched (404). `no_capture` is a call llama-swap listed
+without a capture: evicted before listing, a disconnect or empty body, or a
+capture lost when llama-swap restarted (the cache is in memory even with
+`store.path`). `id_reset=1` means row ids went backwards (the store was wiped,
+moved, or llama-swap ran without `store.path`); the harvester opens a new epoch
+instead of skipping rows. An unreachable llama-swap is logged and retried; the
+service never exits on it. Log lines carry counts and API paths only.
+
+**Reading captures.** Copy `captures/` to the Mac under the ignored `data/`, build
+the session table, then:
+
+```sh
+rsync -a 192.0.2.10:/srv/telemetry/captures/ data/captures/
+uv run agentic-telemetry session-table --out data/session_table.parquet
+uv run agentic-telemetry captures show --captures data/captures \
+  --session-table data/session_table.parquet --session SESSION_ID [--call N]
+```
+
+`RUN_ID` in place of `--session` shows a delegate run's root session;
+`--date YYYY-MM-DD` lists every call of one UTC day with the sessions that claim
+it, or `unclaimed`. It reads only the daily files from the day before the
+selection to the day after, so its cost does not grow with retention; a session
+header naming a session from further away is not seen. A call goes to the session named by its first non-empty
+`x-session-id`, `x-session-affinity` or `x-client-request-id` request header when
+that names a session; otherwise to every session whose time window (padded 5 s)
+and model match, the innermost session of a parent and its subagent winning, and
+flagged `ambiguous` when unrelated sessions overlap. A subagent keeps only
+calls inside its own unpadded window; in the pad its parent keeps them. A
+delegate run's session counts as a child of the session that orchestrated it
+(the one session of the run's checkout, with no run id, running when the run
+started). A header that names no session is flagged `header_unmatched`.
+Without the header, a background subagent on its parent's model, and an
+orchestrator calling while its delegate runs, lose their concurrent calls to
+the child. Pi sends those headers only when a local
+model's entry in Pi's model settings sets `compat.sendSessionAffinityHeaders:
+true` (with `sessionAffinityFormat: "openrouter"` it sends `x-session-id`); that
+is optional, and a client setting, not a scaffold change.
+
+**Deploy** (the first time this stack runs code from this repository):
+
+1. Apply the llama-swap settings above.
+2. In the VM's `.env`, add `COMPOSE_PROFILES=captures` and
+   `CAPTURES_HOST_LABEL` (a plain label such as `gpu`, never a hostname), and
+   `LLAMA_SWAP_API_KEY` only if llama-swap has `apiKeys` set.
+   `LLAMA_SWAP_TARGET` is already the llama-swap `host:port`. Leave the Mac
+   test bed's `.env` without the profile: it never runs the harvester.
+3. Copy `collector/compose.yaml`, `collector/env.example` and
+   `collector/captures/Dockerfile`, and from the repository root
+   `pyproject.toml`, `uv.lock`, `.dockerignore` and `src/`, so that
+   `/opt/telemetry` mirrors the repository layout (`/opt/telemetry/collector/`,
+   `/opt/telemetry/src/`, ...). The build context is the repository root, and
+   `.dockerignore` narrows it to the package.
+4. `sudo mkdir -p /srv/telemetry/captures && sudo chown 10001:10001 /srv/telemetry/captures`
+   (before the first start: Docker would otherwise create it owned by root).
+5. `docker compose build captures-pull && docker compose up -d captures-pull`,
+   then `docker compose logs captures-pull`: the first poll backfills every row
+   llama-swap still lists (old rows without a capture), then poll lines follow.
+
 ## Pipelines (otel-collector.yaml)
 
 Three pipelines, one per signal, all with the same processor chain:
@@ -415,6 +540,7 @@ archive into the new store.
 | llama-swap gateway | Collector scrapes the gateway's own `/metrics` | system and GPU metrics | `performance.disabled: false` in the llama-swap config. Never scrape `/upstream/…` through it (see *Inference server endpoints*) |
 | llama.cpp-style servers behind llama-swap | the inference host agent scrapes each server's own port and sends OTLP to `:4318` (spec 0007) | `llamacpp:*` prompt/predicted token counters, tokens/s, `requests_deferred`, `n_tokens_max` where the build has it | each server's Prometheus route on (llama.cpp: `--metrics`), and a line per model in the agent's `targets.json`. Per-request lines from llama-swap `/logs/stream/http` are not captured yet |
 | Your own Python agents | OTLP from the OTel SDK | GenAI spans + metrics | `OTEL_EXPORTER_OTLP_ENDPOINT=http://telemetry.example:4318` |
+| Local-model requests and responses through llama-swap | the `captures-pull` service reads llama-swap's `/api/metrics/activity` and `/api/captures/{id}` every 15 s (spec 0008) | one record per call: the activity row and its capture, written to `captures/<label>/<YYYY-MM-DD>.jsonl.zst` | `captureBuffer` and `store.path` in the llama-swap config (*Local-model captures*). Files only: never tailed, never in Loki |
 
 The landing zone is where file-only sources meet: a job on any machine can rsync
 files there. The Collector tails only the ledgers, `landing/*/*/.agentic/delegate/ledger.jsonl`
@@ -471,6 +597,8 @@ Timeline for one session:
 | Loki | 2 years | `limits_config.retention_period` + compactor |
 | Tempo | 90 days | `compactor.compaction.block_retention` |
 | Landing-zone files | forever, for now | plan: until processed + 30 days. Nothing deletes landing files yet, and the ship script never passes `--delete` (spec 0004) |
+| Capture files (`captures/<label>/*.jsonl.zst`) | forever, for now | decided once a day's and a week's sizes are measured (spec 0008) |
+| llama-swap's activity store (`store.path`, on the inference host) | forever, for now | grows without bound; pruning is decided with capture retention (spec 0008) |
 
 Derived stats (per-session and per-run summary rows, the per-model failure matrix)
 are computed by the Python package in this repo from the archive and the landing zone, and
@@ -492,7 +620,9 @@ look at in a year; the raw records are what you go back to when a number looks w
    address and `TELEMETRY_ROOT=/srv/telemetry`. Create the data root as in *Run
    locally on the Mac* (the Linux ownership steps) unless provisioning did; either
    way `stat -c '%u:%g %a %n' /srv/telemetry/*` shows `10001:10001` on `archive`,
-   `collector-state`, `loki` and `tempo`. `docker compose up -d`.
+   `collector-state`, `loki` and `tempo`. `docker compose up -d`. The capture
+   harvester needs more files and its own directory; see *Local-model captures*
+   → Deploy.
 3. Check Collector health on the bind address, for example
    `curl -fsS http://192.0.2.10:13133`, replacing `192.0.2.10` with the
    `TELEMETRY_BIND_ADDR` value from `.env`. Validate `otel-collector.yaml` before the first
@@ -774,8 +904,34 @@ Validated today with the pinned images, on the Mac, via Docker:
     20,705 and 7,291 tokens short. A follow-up spec counts subagent usage.
     Spec 0009 now counts it, and the same run joins `joined` with `exact` tokens.
 
+- **Spec 0008, phase A (2026-10-22, on the Mac; no host touched).**
+  - `docker compose --env-file env.example config --quiet` passes with the
+    `captures-pull` service.
+  - `docker compose build captures-pull` builds on linux/arm64, and
+    `docker buildx build --platform linux/amd64` builds the same Dockerfile;
+    the amd64 image runs `captures show --help` under emulation. After review
+    the image copies uv 0.11.33: it accepts the repository's `uv.lock` with
+    `--locked`, builds the package with its own backend, and the build
+    downloads only the hash-pinned `duckdb` and `zstandard`. The image runs as UID
+    10001, and `/app` holds only `pyproject.toml`, `uv.lock` and `src/`.
+  - Against a throwaway fake llama-swap on 127.0.0.1 serving three synthetic
+    calls (one captured, one listed with a capture that answers 404, one
+    without), `captures-pull --once` printed
+    `poll: rows=3 saved=1 evicted=1 no_capture=1 id_reset=0`, wrote one daily
+    file and `cursor.json` (`last_id` 3), and a second `--once` saved 0 rows.
+    The built image, run with host networking, gave the same line, and refused
+    an empty `--host-label` with a usage error.
+  - With `COMPOSE_PROFILES=captures` (as in `env.example`), `config --services`
+    lists `captures-pull`; with neither the profile nor the label set (the Mac
+    test bed), `config --quiet` passes and the service is not listed.
+  - Phase B (the llama-swap settings, the VM deploy, the TTL, restart and
+    coverage checks, and a day's and a week's sizes) is the owner's, in spec
+    0008's owner checklist.
+
 Not yet done:
 - B10, reachability over the Tailnet and from outside both networks (deferred);
-- backups (PBS, a NAS copy of `archive/`) and Grafana data sources, outside
-  spec 0006;
-- the Codex `[otel]` exporter syntax.
+- a NAS copy of `archive/` and Grafana data sources, outside spec 0006 (PBS
+  backs up the VM daily, managed from the homelab repository);
+- the Codex `[otel]` exporter syntax;
+- spec 0008 phase B: llama-swap `captureBuffer` and `store.path`, the
+  `captures-pull` deploy on the VM, and its checks on the inference host.

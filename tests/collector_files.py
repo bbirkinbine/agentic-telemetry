@@ -27,6 +27,9 @@ AGENT_TARGETS_EXAMPLE = AGENT_DIR / "targets.example.json"
 AGENT_SERVICE = "otel-agent"
 # Spec 0006: the launchd job that runs ship-ledgers.sh every 15 minutes on the Mac.
 SHIP_PLIST = COLLECTOR_DIR / "mac-agent" / "com.example.ship-ledgers.plist"
+# Spec 0008: the harvester image, built from the repository root.
+DOCKERFILE = COLLECTOR_DIR / "captures" / "Dockerfile"
+DOCKERIGNORE = REPO_ROOT / ".dockerignore"
 
 # The tracked collector files the hygiene rules scan. Never `landing/` evidence.
 HYGIENE_FILES = (
@@ -45,6 +48,7 @@ HYGIENE_FILES = (
     "collector/inference-agent/otel-agent.yaml",
     "collector/inference-agent/env.example",
     "collector/inference-agent/targets.example.json",
+    "collector/captures/Dockerfile",
 )
 
 _HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
@@ -78,6 +82,33 @@ def compose_services() -> dict[str, dict[str, object]]:
     for name, body in services.items():
         assert isinstance(body, dict), f"expected compose service {name!r} to be a mapping"
     return services
+
+
+def image_services() -> dict[str, dict[str, object]]:
+    """Return the compose services that run a pulled image, not one built here."""
+    return {name: body for name, body in compose_services().items() if "build" not in body}
+
+
+def dockerfile_image_references(path: Path = DOCKERFILE) -> list[str]:
+    """Return every image a Dockerfile pulls: `FROM` images and `COPY --from=` images.
+
+    Build-stage names (`FROM ... AS name`) and `--platform` flags are skipped.
+    """
+    stages: set[str] = set()
+    images: list[str] = []
+    for line in read_text(path).splitlines():
+        words = [w for w in line.split() if not w.startswith("--platform")]
+        if not words or words[0].upper() not in {"FROM", "COPY"}:
+            continue
+        if words[0].upper() == "FROM" and len(words) > 1:
+            if words[1] not in stages:
+                images.append(words[1])
+            if len(words) >= 4 and words[2].upper() == "AS":
+                stages.add(words[3])
+            continue
+        sources = [w.removeprefix("--from=") for w in words[1:] if w.startswith("--from=")]
+        images.extend(s for s in sources if s not in stages and not s.isdigit())
+    return images
 
 
 def compose_service(name: str) -> dict[str, object]:

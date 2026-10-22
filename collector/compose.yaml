@@ -68,6 +68,33 @@ services:
     ports:
       - "${TELEMETRY_BIND_ADDR:?set TELEMETRY_BIND_ADDR in collector/.env}:3200:3200"
 
+  # Spec 0008: copies every llama-swap call and its request/response capture into
+  # daily files under captures/<label>/ before llama-swap's in-memory cache evicts
+  # it. Reads only llama-swap's /api/ routes, never /upstream/, so no model's TTL is
+  # reset. Built from this repository (collector/captures/Dockerfile); no ports, and
+  # the Collector never mounts or tails the capture files. Behind the `captures`
+  # profile: only a host whose .env sets COMPOSE_PROFILES=captures (the telemetry
+  # VM) runs it, so the Mac test bed never starts a second harvester. Compose
+  # interpolates every service whatever its profile, so the label defaults to
+  # empty here and the harvester itself refuses an empty --host-label.
+  captures-pull:
+    profiles: [captures]
+    build:
+      context: ..
+      dockerfile: collector/captures/Dockerfile
+    command:
+      - "captures-pull"
+      - "--url=http://${LLAMA_SWAP_TARGET:?set LLAMA_SWAP_TARGET in collector/.env}"
+      - "--host-label=${CAPTURES_HOST_LABEL:-}"
+      - "--out=/captures"
+      - "--interval=15"
+    restart: unless-stopped
+    init: true
+    environment:
+      LLAMA_SWAP_API_KEY: ${LLAMA_SWAP_API_KEY:-}
+    volumes:
+      - ${TELEMETRY_ROOT:?set TELEMETRY_ROOT in collector/.env}/captures:/captures
+
   # Smoke test only; `docker compose up -d` never starts it (profile `smoke`).
   # Sends synthetic telemetry to the Collector over the compose network, so it needs
   # no published port and behaves the same on Linux. Run, for example:

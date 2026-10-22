@@ -1,0 +1,7 @@
+# Build context for collector/captures/Dockerfile (spec 0008): the package and its
+# lockfile only. Everything else, .env files, data/ and landing/ evidence
+# included, stays out of the image.
+*
+!pyproject.toml
+!uv.lock
+!src

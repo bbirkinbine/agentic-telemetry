@@ -11,11 +11,14 @@ import re
 
 from collector_files import (
     COMPOSE,
+    DOCKERFILE,
     ENV_EXAMPLE,
     OTEL_CONFIG,
     as_list,
     compose_service,
     compose_services,
+    dockerfile_image_references,
+    image_services,
     iter_strings,
     load_yaml_mapping,
     parse_env_example,
@@ -43,6 +46,13 @@ SPEC_INDEX_DIGESTS = {
     "grafana/loki:3.7.9": "0db216b630ae1f348a1584c67f3cead8b4c1fc839169a39501db664744158e28",
     "grafana/tempo:2.10.10": "12b0820f13ffa10ce956b6e9acc3b03f3cffded99109be6cc09d106fe56e5d38",
 }
+# Spec 0008: harvester base images, index digests read 2026-10-22 (uv per the review resolutions).
+DOCKERFILE_IMAGES = (
+    "python:3.12-slim-bookworm@sha256:"
+    "6a0e06f5ba0b373d051aabd3fffb9b873f27f9a2a3a14bcbe37dee6f0e3bbc70",
+    "ghcr.io/astral-sh/uv:0.11.33@sha256:"
+    "77280f2f771df71f90786c314fe1bbc1e023feac652969bbf139c280babf2eb7",
+)
 COMPOSE_VARIABLE = re.compile(r"(?<!\$)\$(?:\{([A-Za-z_][A-Za-z0-9_]*)|([A-Za-z_][A-Za-z0-9_]*))")
 COLLECTOR_ENV_REF = re.compile(r"\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}")
 
@@ -189,7 +199,7 @@ def test_env_example_bind_addr_is_loopback_or_documentation_address() -> None:
 
 
 def test_every_image_is_pinned_by_tag_and_index_digest() -> None:
-    images = {name: str(svc.get("image", "")) for name, svc in compose_services().items()}
+    images = {name: str(svc.get("image", "")) for name, svc in image_services().items()}
     unpinned = {name: image for name, image in images.items() if not PINNED_IMAGE.match(image)}
     assert not unpinned, f"images must be name:tag@sha256:<64 hex>: {unpinned}"
 
@@ -205,6 +215,17 @@ def test_stack_images_pin_the_index_digests_named_in_the_spec() -> None:
             f"expected {reference}@sha256:{digest} in {relative(COMPOSE)}, "
             f"got {pinned.get(reference)!r}"
         )
+
+
+def test_built_service_dockerfile_pins_the_spec_base_images() -> None:
+    built = sorted(set(compose_services()) - set(image_services()))
+    assert built == ["captures-pull"], f"expected only captures-pull built here, got {built}"
+    references = dockerfile_image_references()
+    unpinned = [ref for ref in references if not PINNED_IMAGE.match(ref)]
+    assert not unpinned, f"{relative(DOCKERFILE)} images must be name:tag@sha256: {unpinned}"
+    assert sorted(references) == sorted(DOCKERFILE_IMAGES), (
+        f"expected FROM and COPY --from to pull exactly {DOCKERFILE_IMAGES}, got {references}"
+    )
 
 
 def test_telemetrygen_service_is_smoke_profile_gated_without_ports() -> None:

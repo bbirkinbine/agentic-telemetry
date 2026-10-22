@@ -125,6 +125,11 @@ tool swap changes one file.
 - Session table: `uv run agentic-telemetry session-table --out data/session_table.parquet [DIR...]`
   (no DIR = each client's default session directory; DIR = session directories,
   project roots or landing-zone copies)
+- Local-model captures (spec 0008): the VM's `captures-pull` service runs
+  `agentic-telemetry captures-pull --url URL --host-label LABEL --out DIR`
+  (`--once` for one poll; the key only from `LLAMA_SWAP_API_KEY`). To read them,
+  copy the VM's `captures/` to `data/captures/`, build the session table, then
+  `uv run agentic-telemetry captures show --captures data/captures --session-table data/session_table.parquet (--session ID | RUN_ID | --date YYYY-MM-DD) [--call N]`
 - Ship evidence to a landing zone: `collector/mac-agent/ship-ledgers.sh --dest DIR`
   (or over SSH to `TELEMETRY_VM` without `--dest`; `--help` lists options and
   environment). Set `PROJECTS_ROOT` to the directory above your projects.
@@ -254,7 +259,7 @@ Rules for anything that comes from outside:
 - Research papers are cited, never pasted; private repos and the vault are
   never named as sources in tracked files.
 
-## Open work / current state (updated 2026-10-22, after 0009)
+## Open work / current state (updated 2026-10-22, 0008 phase A)
 
 - Bootstrapped 2026-10-21 (full profile). `analysis/` is a design draft.
 - Product spec `docs/specs/0000-product.md` exists. Spec 0001 (run table from
@@ -341,9 +346,9 @@ Rules for anything that comes from outside:
     Access for `/bin/bash` when the projects sit in a privacy-protected folder.
     Remote mode skips project names the VM's shell would split.
   - The bring-up checks are in `collector/README.md` → Verification.
-    Tailnet and off-network reachability is deferred. Grafana data sources,
-    PBS backups and a NAS copy of `archive/` are outside 0006 (D11): until
-    then the VM's disk holds the only copy of new telemetry.
+    Tailnet and off-network reachability is deferred. Grafana data sources
+    and a NAS copy of `archive/` are outside 0006 (D11). Proxmox Backup Server
+    backs up the VM daily, managed from the homelab repository.
   - Finding: `run-table` did not count a subagent's token usage (Pi records it
     on the `subagent` tool result), so a handoff that used a subagent joined as
     `overlap`. Spec 0009 fixes it.
@@ -363,8 +368,33 @@ Rules for anything that comes from outside:
     under-count (spec 0009 Notes).
   - The B24 run now joins `joined` with `exact` tokens, from the project root and
     from a landing-zone copy.
-- Next: spec 0008 (local-model request/response
-  capture, drafted); the easier inference-host install; server columns for the
+- Spec 0008 (local-model request and response capture) is in phase B:
+  - Phase A is built and reviewed on the branch: `src/agentic_telemetry/captures/`,
+    the `captures-pull` compose service (`collector/captures/Dockerfile`, built
+    from the repository root through `.dockerignore`, behind the `captures`
+    profile that only the VM's `.env` enables), and `captures show`.
+  - The harvester polls llama-swap's `/api/metrics/activity` every 15 s, fetches
+    each `/api/captures/{id}`, and appends records unchanged to
+    `captures/<label>/<YYYY-MM-DD>.jsonl.zst` under `TELEMETRY_ROOT`; never in
+    Loki or git, committing every 100 rows. It counts `saved`, `evicted` (404),
+    `no_capture` and `error` (a capture fetch or a row parse failing 3 polls),
+    fetches recent clean
+    rows listed without a capture (llama-swap stores it a moment after listing),
+    and opens a new epoch if row ids go backwards. Torn frames are skipped on
+    read with a warning.
+  - `captures show` reads only the days around its selection and joins calls
+    to session-table sessions: a session-ID request
+    header first, else time window (padded 5 s) and model; a child keeps only
+    calls in its own window, a delegate run's session is a child of the one
+    session that orchestrated it, and unrelated overlaps are `ambiguous`. It
+    prints `src` (owner decision).
+  - Phase B is the owner's (spec 0008 owner checklist): llama-swap
+    `captureBuffer: 1024` and `store.path` through the inference host's
+    sysadmin agent, the VM deploy, and the TTL, restart and coverage checks.
+    The spec turns `shipped` once those counts are recorded.
+  - `docs/specs/0000-product.md` → Upstream dependencies lists the formats and
+    APIs this repo reads but does not own.
+- Next after 0008: the easier inference-host install; server columns for the
   session table (a follow-up 0005 names); or the rest of roadmap unit 2 once the
   scaffold's Phase 1 lands.
 
