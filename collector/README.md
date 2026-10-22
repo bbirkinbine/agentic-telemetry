@@ -924,9 +924,68 @@ Validated today with the pinned images, on the Mac, via Docker:
   - With `COMPOSE_PROFILES=captures` (as in `env.example`), `config --services`
     lists `captures-pull`; with neither the profile nor the label set (the Mac
     test bed), `config --quiet` passes and the service is not listed.
-  - Phase B (the llama-swap settings, the VM deploy, the TTL, restart and
-    coverage checks, and a day's and a week's sizes) is the owner's, in spec
-    0008's owner checklist.
+- **Spec 0008, phase B (2026-10-22).**
+  - **llama-swap settings (owner checklist step 1).** The inference host's
+    sysadmin agent reported:
+    - llama-swap v264, run as a systemd unit;
+    - `captureBuffer` raised from 0 (capture was off) to 1024;
+    - `store.path` set (it was unset) to a SQLite file on a separate persistent
+      volume with 32 GiB free;
+    - `apiKeys` empty, and `ttl` unchanged at 900.
+
+    After an idle restart:
+    - the store exists (4096 bytes);
+    - `GET /api/metrics/activity?page=1&limit=5` answers 200 with `data`,
+      `page`, `limit`, `total` and `total_pages` (`total` 0);
+    - `GET /api/captures/1` answers 404 "capture not found";
+    - no `capture ... skipping` log lines.
+  - **VM deploy (step 2).** The owner added `COMPOSE_PROFILES` and
+    `CAPTURES_HOST_LABEL` to the VM's `.env` and created `captures/` owned by
+    `10001:10001`. The stack directory's `compose.yaml` and `env.example`
+    differed from `main` in comments only; both were kept as `*.bak-pre-0008`
+    and replaced from commit 2818a3d, along with `captures/Dockerfile`,
+    `pyproject.toml`, `uv.lock`, `.dockerignore` and `src/`.
+    - `config --services` lists `captures-pull`.
+    - `docker compose build captures-pull` and `up -d --no-deps captures-pull`
+      left the other four services untouched (up 5 hours).
+    - The harvester logged `captures-pull: polling every 15 s into
+      /captures/gpu` and no `poll failed` line in its first 40 s, against an
+      empty activity list.
+  - **Coverage (step 5, with the review additions).** One short streamed chat
+    call each went through llama-swap from the VM:
+    - `local-qwen38-27b` (llama.cpp): 200 in 20 s;
+    - `local-qwen38-flash-next` (Strata): 200 in 223 s, mostly the model load;
+    - `local-glm53-maya-l` (Project Maya): 200 in 113 s.
+
+    The harvester logged `saved=1` for each, with no `evicted`, `no_capture` or
+    failures. On the Mac, after an `rsync` of `captures/` and a fresh
+    `session-table`, `captures show --date` listed all 3 calls:
+    - each with the served model id and real token counts (in 60, 60 and 20; out
+      41, 46 and 25), as `unclaimed`, because curl calls belong to no session;
+    - `src` comes as `ip:<address>`.
+
+    `--call N` reassembled all three streams as complete (`finish_reason=stop`),
+    with reasoning and content text, `timings`, and `usage` (Strata and Maya),
+    and no unparsed events. The same one-line prompt counted 60 prompt tokens on
+    llama.cpp and Strata but 20 on Maya, and Strata's reasoning mentions a tool
+    instruction the request did not carry. These are leads that the server side
+    adds to the prompt; this capture layer cannot show it (the rendered prompt
+    is spec 0008's non-goal).
+  - **TTL (step 3).** With the harvester polling every 15 s, `/running`
+    listed the Maya-L model as `ready` each minute from the last call
+    (20:21:38 UTC) to 20:36:17, and none at 20:37:17. That is the 900 s TTL, so
+    reading `/api/...` does not keep a model loaded. Its logs over that time
+    held 0 `poll failed` lines and one heartbeat (40 quiet polls, cursor at id 3).
+  - **Restart (step 4).** The sysadmin agent restarted llama-swap while idle at
+    21:00:31 UTC. Activity `total` and the highest id were 3 before and after,
+    and `GET /api/captures/3` answered 404, because the cache is in memory.
+    - Across the restart the harvester logged 0 `poll failed` and 0
+      `id_reset=1`, and its cursor stayed at epoch 0, `last_id` 3.
+    - One more call to `local-qwen38-27b` (200 in 20 s) got id 4. The
+      harvester logged `poll: rows=1 saved=1 evicted=0 no_capture=0
+      id_reset=0`, and the cursor moved to `last_id` 4 in epoch 0.
+  - Still to do: a day's and a week's sizes (step 7): the `evicted` total, the
+    compressed capture size, and the SQLite store's growth.
 
 Not yet done:
 - B10, reachability over the Tailnet and from outside both networks (deferred);

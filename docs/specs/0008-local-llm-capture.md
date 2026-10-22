@@ -566,3 +566,22 @@ re-reviews. The last one, on the id-reset fix, found no issues and called the
 change set clear for commit approval. Gate green: 915 tests, ruff lint and
 format, mypy strict. Phase B (owner checklist) is next; the spec turns `shipped`
 once its counts are recorded.
+
+### Phase B result (2026-10-22)
+
+- Done, with counts in `collector/README.md` → Verification:
+  - step 1, the llama-swap settings (`captureBuffer` was 0, so capture had
+    been off);
+  - step 2, the VM deploy of commit 2818a3d;
+  - step 3, the TTL check (unloads at 900 s while polled);
+  - step 4, the restart check (ids continue, no reset, id 4 saved);
+  - step 5, coverage: llama.cpp, Strata and Maya each saved, with real token
+    counts and complete reassembly.
+- Step 6, Pi's session headers, is optional and not done.
+- Steps 7 and 8, the day and week sizes: outstanding. The spec stays `shipping`
+  until they are recorded.
+- Leads for later specs:
+  - The same prompt counted 60 prompt tokens on llama.cpp and Strata against 20
+    on Maya.
+  - Strata's reasoning cites a tool instruction the request did not carry.
+  - Only the rendered prompt (a non-goal here) can show what the servers add.

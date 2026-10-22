@@ -388,10 +388,13 @@ Rules for anything that comes from outside:
     calls in its own window, a delegate run's session is a child of the one
     session that orchestrated it, and unrelated overlaps are `ambiguous`. It
     prints `src` (owner decision).
-  - Phase B is the owner's (spec 0008 owner checklist): llama-swap
-    `captureBuffer: 1024` and `store.path` through the inference host's
-    sysadmin agent, the VM deploy, and the TTL, restart and coverage checks.
-    The spec turns `shipped` once those counts are recorded.
+  - Phase B, 2026-10-22:
+    - llama-swap now has `captureBuffer: 1024` (it was 0, capture off) and
+      `store.path`.
+    - `captures-pull` runs on the VM.
+    - The coverage, TTL and restart checks passed (`collector/README.md` →
+      Verification).
+    - The spec turns `shipped` once a day's and a week's sizes are recorded.
   - `docs/specs/0000-product.md` → Upstream dependencies lists the formats and
     APIs this repo reads but does not own.
 - Next after 0008: the easier inference-host install; server columns for the
