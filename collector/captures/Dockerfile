@@ -6,9 +6,10 @@
 # see collector/README.md -> Images.
 FROM python:3.12-slim-bookworm@sha256:6a0e06f5ba0b373d051aabd3fffb9b873f27f9a2a3a14bcbe37dee6f0e3bbc70
 
-# uv 0.11.33 (released 2026-07-28): inside pyproject.toml's uv_build>=0.11,<0.12, so uv
-# builds the package with its own backend and downloads none. Only its binary is copied.
-COPY --from=ghcr.io/astral-sh/uv:0.11.33@sha256:77280f2f771df71f90786c314fe1bbc1e023feac652969bbf139c280babf2eb7 /uv /usr/local/bin/uv
+# uv 0.13.1 (released 2026-10-14; digest read 2026-10-22): inside pyproject.toml's
+# uv_build>=0.13.1,<0.14, so uv builds the package with its own backend and downloads
+# none. Only its binary is copied.
+COPY --from=ghcr.io/astral-sh/uv:0.13.1@sha256:4a1f3666816dafadd20ceb71eac9a7d56d7ef30279f7d64048519ab901ada336 /uv /usr/local/bin/uv
 
 ENV PYTHONUNBUFFERED=1 \
     UV_COMPILE_BYTECODE=1 \

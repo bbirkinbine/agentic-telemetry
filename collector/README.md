@@ -81,7 +81,7 @@ either. Checked 2026-10-21 with `docker buildx imagetools inspect`.
 | `grafana/tempo` | `2.10.10` | `sha256:12b0820f13ffa10ce956b6e9acc3b03f3cffded99109be6cc09d106fe56e5d38` | `linux/amd64`, `linux/arm64` | 10001 |
 | `ghcr.io/open-telemetry/opentelemetry-collector-contrib/telemetrygen` | `v0.163.0` | `sha256:569b79a39f8313db839a727e8eac161c66b8a6c2e633f2da4ad352ce7b383c23` | `linux/amd64`, `linux/arm64` | 10001 |
 | `python` (base of `captures/Dockerfile`, 2026-10-22) | `3.12-slim-bookworm` | `sha256:6a0e06f5ba0b373d051aabd3fffb9b873f27f9a2a3a14bcbe37dee6f0e3bbc70` | `linux/amd64`, `linux/arm64` | 10001 (the Dockerfile's `USER`; the base runs as root) |
-| `ghcr.io/astral-sh/uv` (build stage of `captures/Dockerfile`, 2026-10-22; 0.11.x matches `uv_build>=0.11,<0.12`) | `0.11.33` | `sha256:77280f2f771df71f90786c314fe1bbc1e023feac652969bbf139c280babf2eb7` | `linux/amd64`, `linux/arm64` | none at run time: only its `uv` binary is copied in |
+| `ghcr.io/astral-sh/uv` (build stage of `captures/Dockerfile`, 2026-10-22; 0.13.x matches `uv_build>=0.13.1,<0.14`) | `0.13.1` | `sha256:4a1f3666816dafadd20ceb71eac9a7d56d7ef30279f7d64048519ab901ada336` | `linux/amd64`, `linux/arm64` | none at run time: only its `uv` binary is copied in |
 
 To upgrade one, read the new index digest and its users with
 `docker buildx imagetools inspect <image>:<tag>`. Then update every place
@@ -995,6 +995,12 @@ Validated today with the pinned images, on the Mac, via Docker:
   - Follow-up (spec 0008 shipped without it, owner decision): a day's and a
     week's sizes (step 7): the `evicted` total, the compressed capture size, and
     the SQLite store's growth.
+- **uv build backend 0.13 (2026-10-22).** `pyproject.toml` moved to
+  `uv_build>=0.13.1,<0.14` (Dependabot), and the harvester image's uv to 0.13.1
+  to match. `docker buildx build` of `captures/Dockerfile` with `--no-cache`
+  passed on linux/arm64 and linux/amd64; neither log mentions `uv_build`, so
+  the build downloaded only `duckdb` and `zstandard`. Both images run
+  `captures show --help`, and `uv lock --check` passes with the lockfile unchanged.
 
 Not yet done:
 - B10, reachability over the Tailnet and from outside both networks (deferred);
