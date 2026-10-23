@@ -25,6 +25,11 @@ that's two places to drift out of sync. This section holds only the
 If there's nothing operational in flight, say so in one line and move
 on — an empty section beats a stale one.
 
+As of 2026-10-22: no branches or PRs in flight. The VM's `captures-pull` image
+still carries uv 0.11.33; the repository moved it to 0.13.1 (PR #12), which takes
+effect at the next harvester rebuild on the VM. Spec 0008's day and week capture
+size readings are pending.
+
 ---
 
 ## Known risks
@@ -39,9 +44,9 @@ extra care. Each entry: *what to watch*, *why it bites*, *how to avoid*.
   for a later agent — keep the landing zone and archive out of any eval sandbox
 - Config drift — the collector YAMLs were validated against pinned images — after
   editing, re-run the validation commands in `collector/README.md`
-
-Delete this section if the repo is greenfield with no landmines yet.
-Revisit after the first incident.
+- Full local-model content in captures — `captures/` holds every request and
+  response body, system prompts and tool output included — never copy captures
+  into a tracked path; read them under the ignored `data/` only (spec 0008)
 
 ---
 
@@ -104,12 +109,13 @@ git push                   # (requires explicit approval — AGENTS.md → Appro
 
 **Bad merge to main:** open a revert PR with `gh pr create`, or use GitHub's
 "Revert" button on the merged PR. If a collector config change was deployed
-to the VM, redeploy the previous tagged config and re-run its validation.
+to the VM, redeploy the config from the previous `main` commit and re-run its
+validation in `collector/README.md` → Verification.
 
 **Bad dependency change:**
 
 ```bash
-git restore <manifest> <lockfile>   # pyproject.toml + uv.lock, or package.json + package-lock.json
+git restore pyproject.toml uv.lock
 .agentic/toolchain.sh install
 ```
 
@@ -117,10 +123,13 @@ git restore <manifest> <lockfile>   # pyproject.toml + uv.lock, or package.json 
 `~/.local/state/otel-agent/` (queue and local archive); the ship script writes
 to the VM's `landing/` (or, with `--dest`, a local landing zone such as the Mac
 stack's); the VM's Collector writes `archive/` and the three stores
-under `/srv/telemetry/`. Since spec 0003 the same stack also runs on the Mac. It
-writes `archive/` and the three stores under the Mac's `TELEMETRY_ROOT` (from
-`collector/.env`). `docker compose down` keeps them. Never delete that archive to
-"reset" the stack. Clean the Mac agent's state by stopping the agent and deleting
+under `/srv/telemetry/`, and its `captures-pull` service writes `captures/<label>/`
+there (spec 0008). llama-swap on the inference host keeps its activity store at
+`store.path`; never delete either to "reset" capture. A launchd job on the Mac
+runs `ship-ledgers.sh` every 15 minutes. Since spec 0006 the Mac's copy of the
+stack is a stopped test bed; it keeps `archive/` and the three stores under the
+Mac's `TELEMETRY_ROOT` (from `collector/.env`). `docker compose down` keeps them.
+Never delete that archive to "reset" the stack. Clean the Mac agent's state by stopping the agent and deleting
 its directory; never delete the VM archive without a verified backup.
 
 ---
@@ -131,7 +140,7 @@ its directory; never delete the VM archive without a verified backup.
   `review-check` workflow (`/review-check` in Claude, `$review-check` in
   Codex). Flaky twice → file an issue, don't keep re-running.
 - **`.agentic/toolchain.sh install` fails** — delete the environment
-  (`.venv/` or `node_modules/`) and retry. Still failing → check whether
+  (`.venv/`) and retry. Still failing → check whether
   the manifest was edited without regenerating the lockfile.
 - **`pre-commit` blocks every commit** — `git branch --show-current`;
   `no-commit-to-branch` blocks `main`. Branch first.
@@ -139,10 +148,10 @@ its directory; never delete the VM archive without a verified backup.
   differ from the project's tool config. Align them — the project config wins.
 - **Session won't end its turn** — the Stop hook (`gate-on-stop.sh`) is
   holding it: the source tree has pending changes and
-  `.agentic/toolchain.sh gate` is red. Run `/review-check`, fix the failures. A gate that genuinely
-  can't pass is surfaced on the second attempt (with a warning on stderr).
-- **PreToolUse deny-list blocks a command you actually need** — confirm
-  it's truly unrecoverable; if not, the deny-list pattern is wrong (fix
+  `.agentic/toolchain.sh gate` is red. Run `/review-check`, fix the failures. A gate that cannot
+  pass is surfaced on the second attempt (with a warning on stderr).
+- **PreToolUse deny-list blocks a command you need** — confirm
+  it is unrecoverable; if not, the deny-list pattern is wrong (fix
   it). If it is, run outside the agent session.
 - **Collector config rejected at start** — run `otelcol-contrib validate` via the
   pinned image; the error names the component and line
@@ -157,12 +166,13 @@ Changes here may need coordinated changes out there.
 - Telemetry VM (Proxmox): the collector stack; address in the vault's
   `ENDPOINTS.md`, not here; only the human deploys or restarts it
 - The local inference host: the llama-swap gateway, whose own `/metrics` the
-  stack's Collector scrapes, and the inference host agent
-  (`collector/inference-agent/`, spec 0007), installed there by the host's
-  sysadmin, which scrapes each model server's own port; LAN/Tailnet only, no
-  credentials
+  stack's Collector scrapes, and whose `/api/metrics/activity` and
+  `/api/captures/{id}` the VM's `captures-pull` reads (spec 0008, with
+  `captureBuffer` and `store.path` set in its config); and the inference host
+  agent (`collector/inference-agent/`, spec 0007), installed there by the host's
+  sysadmin, which scrapes each model server's own port. LAN/Tailnet only, no
+  credentials unless llama-swap's `apiKeys` is set (then `LLAMA_SWAP_API_KEY` in
+  the VM's untracked `.env`)
 - agentic-scaffold (public repo): produces the ledger format this repo reads;
   format changes there need a reader change here
 - Obsidian vault `Projects/Agentic Scaffold Telemetry/`: the plan of record
-
-Delete this section for a self-contained library / utility repo.
