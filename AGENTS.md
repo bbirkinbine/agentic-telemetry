@@ -287,8 +287,8 @@ Rules for anything that comes from outside:
     Project Maya v1.1.4 (JSON-only metrics) and Sybil.
   - llama-swap runs with `captureBuffer: 1024` and `store.path`; the harvester
     writes `captures/<label>/<YYYY-MM-DD>.jsonl.zst` on the VM, never to Loki
-    or git. The VM's harvester image still has uv 0.11.33 until its next
-    rebuild.
+    or git. The VM's harvester image was rebuilt from commit `0c566e6` (uv
+    0.13.1) on 2026-10-22.
   - A launchd job on the Mac runs `ship-ledgers.sh` every 15 minutes (0004,
     0006). It needs Full Disk Access for `/bin/bash` when the projects sit in a
     privacy-protected folder.

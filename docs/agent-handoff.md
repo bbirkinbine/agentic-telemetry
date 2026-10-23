@@ -26,9 +26,8 @@ If there's nothing operational in flight, say so in one line and move
 on — an empty section beats a stale one.
 
 As of 2026-10-22: no branches or PRs in flight. The VM's `captures-pull` image
-still carries uv 0.11.33; the repository moved it to 0.13.1 (PR #12), which takes
-effect at the next harvester rebuild on the VM. Spec 0008's day and week capture
-size readings are pending.
+was rebuilt from commit `0c566e6` (uv 0.13.1, PR #12) and polls cleanly. Spec
+0008's day and week capture size readings are pending.
 
 ---
 

@@ -1036,6 +1036,15 @@ Validated today with the pinned images, on the Mac, via Docker:
   passed on linux/arm64 and linux/amd64; neither log mentions `uv_build`, so
   the build downloaded only `duckdb` and `zstandard`. Both images run
   `captures show --help`, and `uv lock --check` passes with the lockfile unchanged.
+  - **On the VM (same day, by the sysadmin agent).** `captures/Dockerfile`,
+    `pyproject.toml` and `src/agentic_telemetry/captures/join.py` were replaced
+    with their commit `0c566e6` versions; the sha256 of each matched before and
+    after. `docker compose build --no-cache captures-pull` logged no `uv_build`
+    or `uv-build` line, and the new image reports uv 0.13.1.
+    `up -d --no-deps captures-pull` left the other services' containers and
+    start times unchanged. Since the restart: 0 `poll failed` and 0 `id_reset=1`
+    lines, and the cursor stayed at epoch 0, `last_id` 443 (no model was used in
+    the window).
 
 Not yet done:
 - B10, reachability over the Tailnet and from outside both networks (deferred);
@@ -1048,7 +1057,4 @@ Not yet done:
   `.agentic/telemetry/*.jsonl` include has not yet tailed a real one;
 - the first archive rotation, to confirm the rotated file name (*Pipelines*);
 - spec 0008's day and week size readings, then `captureBuffer` resizing,
-  capture retention and pruning of llama-swap's activity store;
-- rebuilding `captures-pull` on the VM from the uv 0.13.1 `captures/Dockerfile`
-  and `pyproject.toml` (the running image was built from commit 2818a3d with uv
-  0.11.33).
+  capture retention and pruning of llama-swap's activity store.
