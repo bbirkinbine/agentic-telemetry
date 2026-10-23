@@ -30,7 +30,6 @@ line; the source of truth is the spec file, this is a rendered cache. Run
 <!-- specs-status:start -->
 <!-- Generated block — do not edit by hand; the specs-status hook overwrites it. Source of truth is each spec's **Status:** field. -->
 - [0000 — agentic-telemetry](0000-product.md)  (evergreen)
-- [0008 — Local-Model Request and Response Capture](0008-local-llm-capture.md)  (shipping) — depends on 0006
 - ~~[0001 — Run Table](0001-run-table.md)~~  (shipped)
 - ~~[0002 — Session Table](0002-session-table.md)~~  (shipped)
 - ~~[0003 — Local Collector Stack](0003-local-collector-stack.md)~~  (shipped)
@@ -38,6 +37,7 @@ line; the source of truth is the spec file, this is a rendered cache. Run
 - ~~[0005 — Server-Metrics Join](0005-server-metrics-join.md)~~  (shipped) — depends on 0003, 0007
 - ~~[0006 — Telemetry VM Deployment](0006-telemetry-vm-deploy.md)~~  (shipped) — depends on 0003, 0004
 - ~~[0007 — Host-Local Model Metrics Scraper](0007-host-local-model-metrics.md)~~  (shipped) — depends on 0003
+- ~~[0008 — Local-Model Request and Response Capture](0008-local-llm-capture.md)~~  (shipped) — depends on 0006
 - ~~[0009 — Count Subagent Usage in Pi Transcripts](0009-subagent-usage.md)~~  (shipped) — depends on 0001, 0005
 <!-- specs-status:end -->
 

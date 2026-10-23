@@ -992,13 +992,14 @@ Validated today with the pinned images, on the Mac, via Docker:
     - Each subagent's call count equals its assistant turns, once the join fix
       in spec 0008's *Phase B result* is applied.
     - All 443 calls so far take 44.0 MB compressed (about 99 KB a call).
-  - Still to do: a day's and a week's sizes (step 7): the `evicted` total, the
-    compressed capture size, and the SQLite store's growth.
+  - Follow-up (spec 0008 shipped without it, owner decision): a day's and a
+    week's sizes (step 7): the `evicted` total, the compressed capture size, and
+    the SQLite store's growth.
 
 Not yet done:
 - B10, reachability over the Tailnet and from outside both networks (deferred);
 - a NAS copy of `archive/` and Grafana data sources, outside spec 0006 (PBS
   backs up the VM daily, managed from the homelab repository);
 - the Codex `[otel]` exporter syntax;
-- spec 0008 phase B: llama-swap `captureBuffer` and `store.path`, the
-  `captures-pull` deploy on the VM, and its checks on the inference host.
+- spec 0008's day and week size readings, then `captureBuffer` resizing and
+  capture retention.

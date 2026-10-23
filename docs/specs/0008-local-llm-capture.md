@@ -1,6 +1,6 @@
 # 0008 — Local-Model Request and Response Capture
 
-**Status:** shipping
+**Status:** shipped
 **Last updated:** 2026-10-22
 **Depends on:** 0006
 **Roadmap unit:** 5
@@ -595,8 +595,15 @@ once its counts are recorded.
     those too) and 6 with no assistant turn in the transcript, left for a later
     look.
 - Step 6, Pi's session headers, is optional and not done.
-- Steps 7 and 8, the day and week sizes: outstanding. The spec stays `shipping`
-  until they are recorded.
+- Steps 7 and 8, the day and week sizes, are a follow-up (owner decision
+  2026-10-22, "ship today"). They need no code change, so the spec ships without
+  them:
+  - after one normal day and after one week, record the `evicted` total, the
+    compressed capture size and the SQLite store's growth in
+    `collector/README.md` → Verification;
+  - resize `captureBuffer` from the measured eviction (the *Capture on*
+    criterion);
+  - choose capture retention and store pruning from those sizes.
 - Leads for later specs:
   - The same prompt counted 60 prompt tokens on llama.cpp and Strata against 20
     on Maya.

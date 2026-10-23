@@ -259,7 +259,7 @@ Rules for anything that comes from outside:
 - Research papers are cited, never pasted; private repos and the vault are
   never named as sources in tracked files.
 
-## Open work / current state (updated 2026-10-22, 0008 phase A)
+## Open work / current state (updated 2026-10-22, after 0008)
 
 - Bootstrapped 2026-10-21 (full profile). `analysis/` is a design draft.
 - Product spec `docs/specs/0000-product.md` exists. Spec 0001 (run table from
@@ -368,8 +368,8 @@ Rules for anything that comes from outside:
     under-count (spec 0009 Notes).
   - The B24 run now joins `joined` with `exact` tokens, from the project root and
     from a landing-zone copy.
-- Spec 0008 (local-model request and response capture) is in phase B:
-  - Phase A is built and reviewed on the branch: `src/agentic_telemetry/captures/`,
+- Spec 0008 (local-model request and response capture) is shipped:
+  - `src/agentic_telemetry/captures/`,
     the `captures-pull` compose service (`collector/captures/Dockerfile`, built
     from the repository root through `.dockerignore`, behind the `captures`
     profile that only the VM's `.env` enables), and `captures show`.
@@ -386,15 +386,21 @@ Rules for anything that comes from outside:
     to session-table sessions: a session-ID request
     header first, else time window (padded 5 s) and model; a child keeps only
     calls in its own window, a delegate run's session is a child of the one
-    session that orchestrated it, and unrelated overlaps are `ambiguous`. It
-    prints `src` (owner decision).
+    session that orchestrated it, and unrelated overlaps are `ambiguous`. A
+    whole-second call end counts as up to 1 s early when a child and its parent
+    both claim a call. It prints `src` (owner decision).
   - Phase B, 2026-10-22:
     - llama-swap now has `captureBuffer: 1024` (it was 0, capture off) and
       `store.path`.
     - `captures-pull` runs on the VM.
     - The coverage, TTL and restart checks passed (`collector/README.md` →
       Verification).
-    - The spec turns `shipped` once a day's and a week's sizes are recorded.
+    - A real Pi session with 6 subagent runs: all 439 calls saved and claimed,
+      0 ambiguous, about 99 KB a call compressed. Pi sent no session header, so
+      the join was by time and model.
+    - Follow-up: record a day's and a week's sizes, then resize
+      `captureBuffer` and choose retention. Not yet checked on real data: a
+      delegate run's link to its orchestrator, and Pi's session header.
   - `docs/specs/0000-product.md` → Upstream dependencies lists the formats and
     APIs this repo reads but does not own.
 - Next after 0008: the easier inference-host install; server columns for the
