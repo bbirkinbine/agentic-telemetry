@@ -1,6 +1,6 @@
 # Project: agentic-telemetry
 
-The private half of the agentic-scaffold telemetry plan (vault: `Projects/Agentic Scaffold Telemetry/`). The scaffold plants the sensors: a tool-call ledger in every bootstrapped project, run IDs on delegate handoffs. This repo collects and judges the readings: the homelab collector VM (`collector/`), a Python package that reads ledgers, delegate results, client session transcripts and local-LLM server metrics into one run table, the per-model failure matrices, and a small review app for labeling the first failure in a run. Purpose: find patterns that say whether to adjust the coding agent, the delegation packet, or the local model server, and rank served model configurations on this owner's own tasks.
+The private half of the agentic-scaffold telemetry plan (vault: `Projects/Agentic Scaffold Telemetry/`). The scaffold plants the sensors: a tool-call ledger in every bootstrapped project, run IDs on delegate handoffs. This repo collects and judges the readings: the homelab collector VM (`collector/`), a Python package that reads delegate results, client session transcripts, local-LLM server metrics and llama-swap request/response captures into a run table and a session table, and (planned) the per-model failure matrices and a small review app for labeling the first failure in a run. Purpose: find patterns that say whether to adjust the coding agent, the delegation packet, or the local model server, and rank served model configurations on this owner's own tasks.
 
 Treat this repo (`github.com/bbirkinbine/agentic-telemetry`) as **public**
 from commit #1, whether or not it is yet: it starts private and will flip to
@@ -104,9 +104,14 @@ Keep personal preferences in ignored local overlays (`CLAUDE.local.md`,
 - Python 3.12 (managed by `uv`)
 - DuckDB (`duckdb>=1.5.6,<2`) writes and queries Parquet/JSONL in place; files
   stay the record of truth, parsing stays in plain Python
-  (`docs/adr/0001-duckdb-over-files.md`)
-- Collector VM: OpenTelemetry Collector (contrib), VictoriaMetrics, Loki, Tempo,
-  as Docker Compose under `collector/`; Grafana stays on the existing monitoring VM
+  (`docs/adr/0001-duckdb-over-files.md`); `zstandard` reads Codex `.jsonl.zst`
+  transcripts and the capture files
+- Build backend `uv_build>=0.13.1,<0.14`; the harvester image's uv
+  (`collector/captures/Dockerfile`, 0.13.1) must stay inside that range so the
+  image build downloads no backend; move them together
+- Collector VM: OpenTelemetry Collector (contrib), VictoriaMetrics, Loki, Tempo
+  and the `captures-pull` harvester (profile `captures`), as Docker Compose under
+  `collector/`; Grafana stays on the existing monitoring VM
 - pytest + pytest-asyncio
 - ruff (lint + format) + mypy (strict)
 
@@ -119,8 +124,9 @@ tool swap changes one file.
 - Install: `.agentic/toolchain.sh install` (`uv sync`)
 - Run table: `uv run agentic-telemetry run-table --out data/run_table.parquet DIR...`
   (DIR = project roots or landing-zone copies; `data/` is ignored, never committed).
-  Add `--metrics-url http://127.0.0.1:8428` to join each run to the inference
-  host's metrics in the local stack's VictoriaMetrics (spec 0005, read-only).
+  Add `--metrics-url http://telemetry.example:8428` (the telemetry VM's
+  VictoriaMetrics; real address in the untracked env) to join each run to the
+  inference host's metrics (spec 0005, read-only).
   Rerun after about 90 s for a run that just ended.
 - Session table: `uv run agentic-telemetry session-table --out data/session_table.parquet [DIR...]`
   (no DIR = each client's default session directory; DIR = session directories,
@@ -128,7 +134,7 @@ tool swap changes one file.
 - Local-model captures (spec 0008): the VM's `captures-pull` service runs
   `agentic-telemetry captures-pull --url URL --host-label LABEL --out DIR`
   (`--once` for one poll; the key only from `LLAMA_SWAP_API_KEY`). To read them,
-  copy the VM's `captures/` to `data/captures/`, build the session table, then
+  `rsync -a telemetry.example:/srv/telemetry/captures/ data/captures/`, build the session table, then
   `uv run agentic-telemetry captures show --captures data/captures --session-table data/session_table.parquet (--session ID | RUN_ID | --date YYYY-MM-DD) [--call N]`
 - Ship evidence to a landing zone: `collector/mac-agent/ship-ledgers.sh --dest DIR`
   (or over SSH to `TELEMETRY_VM` without `--dest`; `--help` lists options and
@@ -234,8 +240,8 @@ correctness. The rules, complete gate, and fresh semantic review still apply.
   `collector/inference-agent/otel-agent.yaml` are validated
   against pinned images (see `collector/README.md` → Verification); re-validate
   after any edit and record it there
-- `collector/landing/` contents and anything under `data/` are evidence, never
-  edited by hand and never committed
+- `collector/landing/` contents, `captures/` and anything under `data/` are
+  evidence, never edited by hand and never committed
 
 ## Third-party code and licenses
 
@@ -259,153 +265,64 @@ Rules for anything that comes from outside:
 - Research papers are cited, never pasted; private repos and the vault are
   never named as sources in tracked files.
 
-## Open work / current state (updated 2026-10-22, after 0008)
+## Open work / current state (updated 2026-10-22, after 0008 and the uv 0.13 bump)
 
-- Bootstrapped 2026-10-21 (full profile). `analysis/` is a design draft.
-- Product spec `docs/specs/0000-product.md` exists. Spec 0001 (run table from
-  delegate ledgers, review rows, `result.json`, `state.json` and Pi transcripts)
-  is shipped: `src/agentic_telemetry/run_table/` plus the `run-table` CLI. Against
-  the owner's two private projects with delegate runs it writes 15 rows, 11
-  reviews, 4 runs with tokens and 1 orphaned result directory.
-- Spec 0002 (session table from Pi, Claude Code and Codex transcripts, including
-  Codex `.jsonl.zst`) is shipped: `src/agentic_telemetry/session_table/` plus the
-  `session-table` CLI, which reads the clients' default session directories when
-  given no DIR. On the owner's machine it writes 629 sessions (187 Pi, 256 Claude
-  Code, 186 Codex) with no warnings; delegate sessions agree with the run table's
-  token totals.
-- Depends on the scaffold's Phase 1 tool-call ledger (separate work in the
-  agentic-scaffold repo, vault prompt `Agentic Scaffold Telemetry - Agent Prompt`)
-  only for the tool-call ledger reader (the rest of roadmap unit 2).
-- Spec 0003 (local collector stack) is shipped:
-  - `collector/` first ran on the owner's Mac under OrbStack (now a stopped test
-    bed; the stack runs on the VM since 0006). Images are pinned
-    by multi-arch digest, and host values come from the untracked `collector/.env`
-    (template `collector/env.example`). Ports bind to `TELEMETRY_BIND_ADDR`.
-  - The archive is native-zstd OTLP JSON (`archive/<signal>.jsonl*.zst`), behind
-    an Alpha feature gate.
-  - A telemetrygen smoke test passed in all three stores and the archive.
-  - The Collector scrapes only llama-swap's own `/metrics` (`up == 1`), never
-    `/upstream/`, because that resets model TTL. The endpoint findings and the
-    stored `llamacpp_*` names are in `collector/README.md`. ADR 0002 records the
-    choice of the Grafana-stack stores.
-- Spec 0007 (inference host agent) is shipped:
-  - `collector/inference-agent/` is a Collector that runs on the inference host
-    with host networking. It scrapes each model server on its own port, using
-    targets from an untracked `targets.json` that also sets `model_id`, and sends
-    OTLP to the stack through a disk queue. llama-swap never sees these requests,
-    and a relabel rule drops any `/upstream/` path.
-  - Live since 2026-10-21. The owner copies the four files to the host, and its
-    sysadmin agent installs them. Covered: Strata and llama.cpp (`--metrics`
-    added). Uncovered: Project Maya v1.1.4 and Sybil.
-  - A loaded llama.cpp model delivered 16 `llamacpp_*` series with `model_id`.
-    It unloaded on its 900 s TTL, and nothing reloaded it.
-  - It sends to the telemetry VM since 0006 (B18). The Mac bound `0.0.0.0` only
-    while it hosted the stack (0007 D1); it is back on `127.0.0.1`.
-  - Follow-ups:
-    - an easier install (a one-command script, or Ansible);
-    - llama-swap issue #1135: if llama-swap's own `/metrics` gains per-model
-      data, the agent can be retired.
-- Spec 0005 (server-metrics join) is shipped:
-  - `run-table --metrics-url URL` joins each delegate run to the inference host's
-    per-model series in VictoriaMetrics, through `src/agentic_telemetry/server_metrics/`.
-  - The model comes from the run's own transcript (served, then requested), with
-    no alias table. Inference from moving counters happens only for a run with
-    no recorded names, and only on an exact token match.
-  - Throughput comes from counter increases. Each run's tokens are reconciled
-    against the server's, and it gets a status: joined, joined_approx, overlap,
-    uncovered, no_data or error.
-  - Its implement phase was the first dogfooded handoff (`local-qwen38-flash-next`).
-    That run joined `exact`, and the review verdict `model-defect` demoted the
-    model for `phase:implement`. Delegation is active for this checkout
-    (`policy = auto`).
-- Spec 0004 (landing-zone shipping) is shipped:
-  - `collector/mac-agent/ship-ledgers.sh` finds projects up to `--max-depth`
-    below `PROJECTS_ROOT`. It copies only what `run-table` reads, keeping
-    `.agentic` in the path, plus client transcripts to `_sessions/`. It copies
-    over SSH, or with `--dest DIR` into a local landing zone. It never deletes
-    and never copies a symlink. Two projects with one name are skipped (exit 1).
-  - The Collector tails only ledgers, timestamps each line with its own `ts`,
-    and gives each project its own Loki stream. Transcripts are read in batch,
-    never tailed. Loki refused lines older than a week until 0006 widened its
-    window to two years; the archive keeps everything.
-  - `run-table` keeps the copy with more reviews when one is a stale copy of
-    the other, with a warning. Any other difference still exits 1.
-  - The local landing zone gives the same run and session rows as the project
-    roots.
-- Spec 0006 (telemetry VM deployment) is shipped:
-  - The stack runs on the `telemetry` VM (Ubuntu 24.04 amd64, Docker from
-    Docker's apt repository), provisioned from the owner's homelab repository.
-    Its ports bind to the VM's LAN address only; Tailnet clients are meant to
-    reach it through the subnet router (not yet checked, B10). Loki accepts lines up to two years old
-    (`reject_old_samples_max_age: 17520h`).
-  - The inference host agent sends to the VM. The Mac's stack is stopped, kept
-    as a test bed on `127.0.0.1`.
-  - A launchd job on the Mac runs `ship-ledgers.sh` every 15 minutes in SSH batch
-    mode with connect and idle timeouts (template
-    `collector/mac-agent/com.example.ship-ledgers.plist`). It needs Full Disk
-    Access for `/bin/bash` when the projects sit in a privacy-protected folder.
-    Remote mode skips project names the VM's shell would split.
-  - The bring-up checks are in `collector/README.md` → Verification.
-    Tailnet and off-network reachability is deferred. Grafana data sources
-    and a NAS copy of `archive/` are outside 0006 (D11). Proxmox Backup Server
-    backs up the VM daily, managed from the homelab repository.
-  - Finding: `run-table` did not count a subagent's token usage (Pi records it
-    on the `subagent` tool result), so a handoff that used a subagent joined as
-    `overlap`. Spec 0009 fixes it.
-- Spec 0009 (subagent usage in the run table) is shipped:
-  - A run's token columns add each Pi `subagent` tool result's `usage`. The
-    subagent's own transcript copies under `session/` are never read, so each
-    turn counts once, and landing-zone copies (parent transcripts only) give the
-    same rows.
-  - New columns `subagent_runs` (child runs), `subagent_turns` (their turns) and
-    `subagent_models` (child model names, without a `<provider>/` prefix that
-    matches the run's own provider). `assistant_turns`,
-    `peak_turn_prompt_tokens`, `tokens_reasoning` (Pi reports none for a
-    subagent) and `requested_models` stay the parent's, so the join still
-    resolves the parent's model.
-  - The session table is unchanged: it already gives each Pi child session its
-    own `is_subagent` row. Background subagents and grandchildren still
-    under-count (spec 0009 Notes).
-  - The B24 run now joins `joined` with `exact` tokens, from the project root and
-    from a landing-zone copy.
-- Spec 0008 (local-model request and response capture) is shipped:
-  - `src/agentic_telemetry/captures/`,
-    the `captures-pull` compose service (`collector/captures/Dockerfile`, built
-    from the repository root through `.dockerignore`, behind the `captures`
-    profile that only the VM's `.env` enables), and `captures show`.
-  - The harvester polls llama-swap's `/api/metrics/activity` every 15 s, fetches
-    each `/api/captures/{id}`, and appends records unchanged to
-    `captures/<label>/<YYYY-MM-DD>.jsonl.zst` under `TELEMETRY_ROOT`; never in
-    Loki or git, committing every 100 rows. It counts `saved`, `evicted` (404),
-    `no_capture` and `error` (a capture fetch or a row parse failing 3 polls),
-    fetches recent clean
-    rows listed without a capture (llama-swap stores it a moment after listing),
-    and opens a new epoch if row ids go backwards. Torn frames are skipped on
-    read with a warning.
-  - `captures show` reads only the days around its selection and joins calls
-    to session-table sessions: a session-ID request
-    header first, else time window (padded 5 s) and model; a child keeps only
-    calls in its own window, a delegate run's session is a child of the one
-    session that orchestrated it, and unrelated overlaps are `ambiguous`. A
-    whole-second call end counts as up to 1 s early when a child and its parent
-    both claim a call. It prints `src` (owner decision).
-  - Phase B, 2026-10-22:
-    - llama-swap now has `captureBuffer: 1024` (it was 0, capture off) and
-      `store.path`.
-    - `captures-pull` runs on the VM.
-    - The coverage, TTL and restart checks passed (`collector/README.md` →
-      Verification).
-    - A real Pi session with 6 subagent runs: all 439 calls saved and claimed,
-      0 ambiguous, about 99 KB a call compressed. Pi sent no session header, so
-      the join was by time and model.
-    - Follow-up: record a day's and a week's sizes, then resize
-      `captureBuffer` and choose retention. Not yet checked on real data: a
-      delegate run's link to its orchestrator, and Pi's session header.
-  - `docs/specs/0000-product.md` → Upstream dependencies lists the formats and
-    APIs this repo reads but does not own.
-- Next after 0008: the easier inference-host install; server columns for the
-  session table (a follow-up 0005 names); or the rest of roadmap unit 2 once the
-  scaffold's Phase 1 lands.
+- Bootstrapped 2026-10-21 (full profile). Specs 0001-0009 are shipped; each
+  spec holds its own decisions, checks and measured numbers, and
+  `docs/specs/README.md` holds the dashboard. `docs/specs/0000-product.md` →
+  Upstream dependencies lists the formats and APIs this repo reads but does not
+  own. `analysis/` is a design draft. `README.md` → How it works has the
+  architecture diagrams.
+- What runs where:
+  - The collector stack (spec 0003, deployed by 0006) runs on the telemetry VM:
+    Collector, VictoriaMetrics, Loki, Tempo and, behind the `captures` profile,
+    the `captures-pull` harvester (0008). Ports bind to the VM's LAN address;
+    Loki accepts lines up to two years old; Proxmox Backup Server backs the VM
+    up daily, managed outside this repo. The Mac's stack is a stopped test bed
+    on `127.0.0.1`.
+  - The stack's Collector scrapes only llama-swap's own `/metrics`, never
+    `/upstream/` (it resets a model's TTL). The inference host agent
+    (`collector/inference-agent/`, 0007) scrapes each model server on its own
+    port and sends OTLP to the VM. Covered: Strata and llama.cpp. Uncovered:
+    Project Maya v1.1.4 (JSON-only metrics) and Sybil.
+  - llama-swap runs with `captureBuffer: 1024` and `store.path`; the harvester
+    writes `captures/<label>/<YYYY-MM-DD>.jsonl.zst` on the VM, never to Loki
+    or git. The VM's harvester image still has uv 0.11.33 until its next
+    rebuild.
+  - A launchd job on the Mac runs `ship-ledgers.sh` every 15 minutes (0004,
+    0006). It needs Full Disk Access for `/bin/bash` when the projects sit in a
+    privacy-protected folder.
+  - Delegation is active for this checkout (`policy = auto`); Flash Next is
+    demoted for `phase:implement` after the 0005 dogfood handoff.
+- What the package builds (`src/agentic_telemetry/`):
+  - `run-table` (0001): one row per delegate run with its review verdict,
+    failure phase and transcript tokens, Pi `subagent` usage included (0009).
+    With `--metrics-url` it joins each run to the inference host's per-model
+    series (0005): `server_*` columns and a status of joined, joined_approx,
+    overlap, uncovered, no_data or error.
+  - `session-table` (0002): one row per Pi, Claude Code or Codex session.
+  - `captures show` (0008): harvested local-model calls joined to sessions by
+    session header, else by time window and model; it prints the client
+    address llama-swap recorded (`src`).
+- Open follow-ups:
+  - 0008: record a day's and a week's capture sizes, then resize
+    `captureBuffer` and choose capture and store retention. Not yet seen on
+    real data: a delegate run's link to its orchestrator, and Pi's session
+    header.
+  - 0007: an easier inference-host install (one-command script or Ansible);
+    retire the agent if llama-swap issue #1135 adds per-model data to its own
+    `/metrics`.
+  - 0006: Tailnet and off-network reachability (B10), Grafana data sources,
+    and a NAS copy of `archive/`.
+  - 0009: background subagents and grandchildren still under-count.
+- Next: the 0008 size readings once a week of captures exists; the easier
+  inference-host install; server columns for the session table (a follow-up
+  0005 names); the live OTLP path from the Mac
+  (`collector/mac-agent/otel-agent.yaml`, deferred by 0003, no spec yet); or the
+  rest of roadmap unit 2 (the tool-call ledger reader and the transition failure
+  matrix) once the scaffold's Phase 1 tool-call ledger lands (separate work in
+  the agentic-scaffold repo, vault prompt `Agentic Scaffold Telemetry - Agent
+  Prompt`).
 
 <!-- agentic-scaffold:standing-rules:start -->
 

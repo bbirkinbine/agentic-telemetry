@@ -61,10 +61,11 @@ leaderboards; this only has to answer questions about my own setup.
 
 ## Constraints and assumptions
 
-- Solo-maintained, private repository; Python 3.12 with uv; the scaffold's gate and
-  loop.
-- Runs on the homelab: a new Proxmox VM, LAN and Tailnet only, nothing exposed
-  publicly.
+- Solo-maintained repository, private now and public later (MIT), so it is
+  treated as public from the first commit; Python 3.12 with uv; the scaffold's
+  gate and loop.
+- Runs on the homelab: a dedicated Proxmox VM (the telemetry VM, spec 0006), LAN
+  and Tailnet only, nothing exposed publicly.
 - The Mac must keep working offline: files are the record of truth and shipping to
   the VM is lagged, never required during a session.
 - The public scaffold cannot carry any hostname or endpoint; everything with a real
@@ -101,7 +102,8 @@ the specs listed against it are the ones to re-check.
    roots (or the VM landing-zone layout), read every `ledger.jsonl` and `result.json` into
    one Parquet table keyed by run ID and served-configuration fingerprint, with
    outcome, first-failure phase, timings and tokens. Proven on whatever projects
-   exist at the time. Spec: `docs/specs/0001-*.md` (next).
+   exist at the time. Specs: 0001 (shipped); 0009 (shipped) adds Pi subagent
+   usage to the token columns.
 2. Tool-call ledger reader and session summaries: parse the scaffold's Phase 1
    ledger and the three clients' session transcripts into per-session rows, then
    the transition failure matrix per fingerprint. The session-transcript half is
@@ -111,13 +113,20 @@ the specs listed against it are the ones to re-check.
    `collector/`, ship ledgers from the Mac, scrape the inference host, and join each run's time
    window to the server metrics. Specs: 0003 (local stack on the Mac), 0004
    (landing-zone shipping and ledger ingestion), 0005 (server-metrics join), 0006
-   (telemetry VM deployment), 0007 (host-local model metrics scraper).
+   (telemetry VM deployment), 0007 (host-local model metrics scraper). All five
+   shipped. Still open: Tailnet and off-network reachability, Grafana data
+   sources for the three stores, a NAS copy of `archive/`, and an easier
+   inference-host install.
 4. Later: the review and labeling app; the Langfuse importer and optional viewer
-   (useful for employability as well as browsing; see `analysis/README.md`).
+   (useful for employability as well as browsing; `analysis/README.md` → Not now
+   says why it waits).
 5. Local-model request and response capture: keep llama-swap's per-call captures
    of every local-model request and response as files, and join them to sessions
-   and runs, so a session can be read turn by turn as the model saw it. Spec: 0008. The rendered
-   chat-template prompt is a later layer.
+   and runs, so a session can be read turn by turn as the model saw it. Spec: 0008
+   (shipped: `captures-pull` on the telemetry VM, `captures show` on the Mac).
+   Follow-up, no code change: record a day's and a week's capture size and
+   eviction count, resize `captureBuffer` from them, and choose capture retention
+   and store pruning. The rendered chat-template prompt is a later layer.
 
 ## Open questions
 
@@ -127,3 +136,7 @@ the specs listed against it are the ones to re-check.
 - Resolved 2026-10-22 (spec 0004): session transcripts are read in batch from the
   landing zone by `run-table` and `session-table`; the Collector tails only
   ledgers, so captured tool content never reaches Loki.
+- Resolved 2026-10-22 (spec 0008): polling llama-swap's `/api/...` routes does
+  not reset a model's TTL; a polled model still unloads at 900 s.
+- Open (spec 0008 follow-up): how long to keep capture files and the inference
+  host's activity store, once a day's and a week's sizes are measured.

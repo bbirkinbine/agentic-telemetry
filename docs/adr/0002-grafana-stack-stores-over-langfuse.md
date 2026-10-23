@@ -1,7 +1,16 @@
 # 0002 — Grafana-Stack Stores on a Separate Telemetry Host Instead of Langfuse
 
 **Status:** accepted
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
+
+> Note 2026-10-22: Specs 0003-0007 implement this decision; 0008 adds a fifth
+> service, the `captures-pull` harvester, which writes files only and feeds no
+> store. The stack runs on the dedicated `telemetry` VM (0006); the Mac's copy
+> is a stopped test bed. The 0005 join reads per-model `llamacpp_*` series from
+> the inference host agent (0007), since llama-swap's own `/metrics` carries no
+> per-model data. Grafana stays on the monitoring VM, but its data sources for
+> the three stores are not added yet. Proxmox Backup Server backs up the VM
+> daily (managed outside this repo); the NAS copy of `archive/` is still planned.
 
 ## Context
 

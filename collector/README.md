@@ -16,7 +16,7 @@ servers, your own apps); the VM does not.
 
 The rule that makes it source-agnostic: **everything enters as OpenTelemetry (OTLP)
 or as a JSONL file dropped in a landing zone. Nothing else.** The Collector is the only
-process that knows where data goes.
+process that knows where data goes, with one exception, noted below the diagram.
 
 ```
                  OTLP 4317/4318                          ┌──────────────────┐
@@ -33,12 +33,17 @@ process that knows where data goes.
                                                      └──>│ archive/*.zst    │ raw, forever (zstd)
                                                          └──────────────────┘
                                                                   ▲
-                                            existing Grafana VM queries the three stores 
+                                            existing Grafana VM is to query the three stores (not yet added)
 ```
 
 The model servers behind llama-swap are not in the diagram's scrape path. An
 agent on the inference host scrapes each one on its own port and sends the
 samples to the Collector as OTLP on 4318 (*Inference host agent*).
+
+The `captures-pull` service (spec 0008) is the one exception to the rule above:
+it polls llama-swap's `/api/` routes every 15 s and writes full request and
+response bodies to `captures/<label>/` itself. Those files stay outside the
+Collector and never reach Loki (*Local-model captures*).
 
 ## VM
 
@@ -60,7 +65,8 @@ samples to the Collector as OTLP on 4318 (*Inference host agent*).
 | `victoriametrics` | `victoriametrics/victoria-metrics` | 8428 | `-retentionPeriod=5y` | metrics. Accepts OTLP natively at `/opentelemetry/v1/metrics`; Prometheus-compatible query API for Grafana |
 | `loki` | `grafana/loki` | 3100 | 730 days via compactor | logs and events. Accepts OTLP natively at `/otlp` |
 | `tempo` | `grafana/tempo` | 3200, 4317 internal | 90 days | traces. Optional; only Claude Code beta tracing and your own apps emit traces today |
-| `captures-pull` | built from `captures/Dockerfile` | none | forever, for now | copies llama-swap's per-call request/response captures into `captures/<label>/` (spec 0008, *Local-model captures*) |
+| `captures-pull` | built from `captures/Dockerfile` | none | forever, for now | copies llama-swap's per-call request/response captures into `captures/<label>/` (spec 0008, *Local-model captures*); profile `captures`, so only a host whose `.env` sets `COMPOSE_PROFILES=captures` (the VM) runs it |
+| `telemetrygen` | `ghcr.io/open-telemetry/opentelemetry-collector-contrib/telemetrygen` | none | n/a | smoke test only (profile `smoke`): sends one trace, metric or log to the Collector; `docker compose up -d` never starts it |
 
 Grafana is **not** run here. Add three data sources to the existing Grafana on
 the monitoring VM: VictoriaMetrics (Prometheus type), Loki, Tempo.
@@ -81,7 +87,7 @@ either. Checked 2026-10-21 with `docker buildx imagetools inspect`.
 | `grafana/tempo` | `2.10.10` | `sha256:12b0820f13ffa10ce956b6e9acc3b03f3cffded99109be6cc09d106fe56e5d38` | `linux/amd64`, `linux/arm64` | 10001 |
 | `ghcr.io/open-telemetry/opentelemetry-collector-contrib/telemetrygen` | `v0.163.0` | `sha256:569b79a39f8313db839a727e8eac161c66b8a6c2e633f2da4ad352ce7b383c23` | `linux/amd64`, `linux/arm64` | 10001 |
 | `python` (base of `captures/Dockerfile`, 2026-10-22) | `3.12-slim-bookworm` | `sha256:6a0e06f5ba0b373d051aabd3fffb9b873f27f9a2a3a14bcbe37dee6f0e3bbc70` | `linux/amd64`, `linux/arm64` | 10001 (the Dockerfile's `USER`; the base runs as root) |
-| `ghcr.io/astral-sh/uv` (build stage of `captures/Dockerfile`, 2026-10-22; 0.13.x matches `uv_build>=0.13.1,<0.14`) | `0.13.1` | `sha256:4a1f3666816dafadd20ceb71eac9a7d56d7ef30279f7d64048519ab901ada336` | `linux/amd64`, `linux/arm64` | none at run time: only its `uv` binary is copied in |
+| `ghcr.io/astral-sh/uv` (`COPY --from` in `captures/Dockerfile`, 2026-10-22; must stay inside `pyproject.toml`'s `uv_build>=0.13.1,<0.14`) | `0.13.1` | `sha256:4a1f3666816dafadd20ceb71eac9a7d56d7ef30279f7d64048519ab901ada336` | `linux/amd64`, `linux/arm64` | none at run time: only its `uv` binary is copied in |
 
 To upgrade one, read the new index digest and its users with
 `docker buildx imagetools inspect <image>:<tag>`. Then update every place
@@ -89,6 +95,11 @@ that pins it:
 - `compose.yaml`;
 - for the Collector, `inference-agent/compose.yaml` too (a test keeps the two
   image strings identical), then re-copy it to the inference host;
+- for uv, a version inside `pyproject.toml`'s `uv_build` range; outside it the
+  image build fetches an unpinned build backend from PyPI;
+- on the VM, the re-copied `compose.yaml` (for the harvester, also
+  `captures/Dockerfile`, `pyproject.toml` and `uv.lock`, then
+  `docker compose build captures-pull`), then `docker compose up -d`;
 - this table;
 - the `SPEC_INDEX_DIGESTS` constant in `tests/test_collector_compose.py` (for the
   harvester's bases, `captures/Dockerfile` and `DOCKERFILE_IMAGES` there);
@@ -182,7 +193,7 @@ is closed and the agent's `up` for it drops to 0.
 The same `compose.yaml` runs under OrbStack on the Mac (spec 0003) and on the
 telemetry VM (spec 0006). Only the untracked `.env` differs.
 
-1. Create `.env` from the tracked template, then set the three values:
+1. Create `.env` from the tracked template, then set the three required values and decide the capture lines:
 
    ```bash
    cp env.example .env
@@ -202,8 +213,8 @@ telemetry VM (spec 0006). Only the untracked `.env` differs.
        `*:` address means all interfaces.
      - The VM uses its LAN address; the Tailnet reaches it through the subnet
        router (spec 0006).
-   - `COMPOSE_PROFILES` and `CAPTURES_HOST_LABEL` (spec 0008): on the Mac
-     test bed, delete both lines. With the `captures` profile on, `up -d`
+   - `COMPOSE_PROFILES`, `CAPTURES_HOST_LABEL` and `LLAMA_SWAP_API_KEY` (spec
+     0008): on the Mac test bed, delete the first two lines. With the `captures` profile on, `up -d`
      would start a second capture harvester against the same llama-swap. The
      VM keeps them (*Local-model captures* → Deploy).
 
@@ -228,7 +239,7 @@ telemetry VM (spec 0006). Only the untracked `.env` differs.
    - **Linux (the telemetry VM, spec 0006).** The Collector, Loki and Tempo run
      as UID 10001 and must own their folders. VictoriaMetrics runs as root.
      `landing/` belongs to the user who ships files, and UID 10001 reads it.
-     Spec 0006 runs these steps for real:
+     Spec 0006 ran these steps on the VM (*Verification*, B2); spec 0008 added `captures`:
 
      ```bash
      root=/path/from/TELEMETRY_ROOT
@@ -243,6 +254,9 @@ telemetry VM (spec 0006). Only the untracked `.env` differs.
    docker compose up -d
    curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:13133
    ```
+
+   On the VM the ports bind to its LAN address, not loopback: use its
+   `TELEMETRY_BIND_ADDR` value in place of `127.0.0.1` here and in step 4.
 
 4. Smoke test: send one trace, metric and log through the Collector with
    telemetrygen, then find each one in its store and in the archive. The
@@ -285,8 +299,8 @@ host, not with the stack. Every 30 s it scrapes each model server on that
 server's own local port, labels the samples with the llama-swap `model_id`, and
 sends them as OTLP to the stack's Collector. llama-swap never sees these
 requests, so model TTLs are untouched. Its sending queue is on disk and retries
-without a time limit, so samples taken while the stack is unreachable (the Mac
-asleep or away) are delivered when it returns.
+without a time limit, so samples taken while the stack is unreachable (a VM
+reboot or a network outage) are delivered when it returns.
 
 | File | On the inference host |
 |---|---|
@@ -455,7 +469,7 @@ service never exits on it. Log lines carry counts and API paths only.
 the session table, then:
 
 ```sh
-rsync -a 192.0.2.10:/srv/telemetry/captures/ data/captures/
+rsync -a telemetry.example:/srv/telemetry/captures/ data/captures/
 uv run agentic-telemetry session-table --out data/session_table.parquet
 uv run agentic-telemetry captures show --captures data/captures \
   --session-table data/session_table.parquet --session SESSION_ID [--call N]
@@ -501,16 +515,27 @@ is optional, and a client setting, not a scaffold change.
    then `docker compose logs captures-pull`: the first poll backfills every row
    llama-swap still lists (old rows without a capture), then poll lines follow.
 
+To update the harvester after a change to `src/`, `pyproject.toml`, `uv.lock`
+or `captures/Dockerfile`, re-copy those files as in step 3, then
+`docker compose build captures-pull && docker compose up -d captures-pull`.
+
 ## Pipelines (otel-collector.yaml)
 
-Three pipelines, one per signal, all with the same processor chain:
+Three pipelines, one per signal. Each starts with `memory_limiter` and
+`resource` and ends with `batch`; logs and traces also run `redaction` and
+`transform/size` in between:
 
 1. `memory_limiter` first (Collector docs say so).
 2. `resource` adds `deployment.environment=homelab` so dashboards can filter.
-3. `redaction` masks API-key, AWS-key, PEM and email shapes in every attribute. This
-   is the second redaction layer; the first is at the source (hook or SDK).
-4. `transform` truncates any attribute over 16 KB so a pasted file can't bloat a span.
+3. Logs and traces only: `redaction` masks API-key, AWS-key, GitHub-token, PEM
+   and email shapes in every attribute. This is the second redaction layer; the
+   first is at the source (hook or SDK).
+4. Logs and traces only: `transform/size` truncates any attribute over 16 KB so
+   a pasted file can't bloat a span or log record.
 5. `batch`.
+
+The metrics pipeline (OTLP and the llama-swap scrape) runs only
+`memory_limiter`, `resource` and `batch`.
 
 Every pipeline exports to **two places**: the long-term store for that signal, and
 the `file` exporter writing `archive/<signal>.jsonl.zst`. Each file is OTLP JSON,
@@ -536,11 +561,16 @@ archive into the new store.
 | Codex CLI | OTLP/HTTP to `:4318` | log events (`codex.tool_decision`, `codex.tool_result`, ...) | `[otel]` table in `~/.codex/config.toml` with an `otlp-http` exporter. Exact sub-table syntax still unverified; see the vault plan |
 | Pi, Claude Code and Codex transcripts | landing zone, batch only | session JSONL (Codex also `.jsonl.zst`) | `mac-agent/ship-ledgers.sh` copies them to `landing/<host>/_sessions/{pi,claude-code,codex}/`; `session-table` reads them there. Never tailed (spec 0004) |
 | Delegate runner | landing zone | `ledger.jsonl` (tailed); `results/<run>/{result.json,state.json,session/*.jsonl}` (batch) | `mac-agent/ship-ledgers.sh` copies these, and nothing else, to `landing/<host>/<project>/.agentic/delegate/`; `run-table` reads them there |
-| Scaffold tool-call ledger (Phase 1, all clients) | landing zone | one JSON line per tool call | `mac-agent/ship-ledgers.sh` copies `.agentic/telemetry/*.jsonl` to `landing/<host>/<project>/.agentic/telemetry/`, where the Collector tails it |
+| Scaffold tool-call ledger (Phase 1, all clients; not written yet) | landing zone | one JSON line per tool call | `mac-agent/ship-ledgers.sh` copies `.agentic/telemetry/*.jsonl` to `landing/<host>/<project>/.agentic/telemetry/`, where the Collector tails it |
 | llama-swap gateway | Collector scrapes the gateway's own `/metrics` | system and GPU metrics | `performance.disabled: false` in the llama-swap config. Never scrape `/upstream/…` through it (see *Inference server endpoints*) |
-| llama.cpp-style servers behind llama-swap | the inference host agent scrapes each server's own port and sends OTLP to `:4318` (spec 0007) | `llamacpp:*` prompt/predicted token counters, tokens/s, `requests_deferred`, `n_tokens_max` where the build has it | each server's Prometheus route on (llama.cpp: `--metrics`), and a line per model in the agent's `targets.json`. Per-request lines from llama-swap `/logs/stream/http` are not captured yet |
+| llama.cpp-style servers behind llama-swap | the inference host agent scrapes each server's own port and sends OTLP to `:4318` (spec 0007) | `llamacpp:*` prompt/predicted token counters, tokens/s, `requests_deferred`, `n_tokens_max` where the build has it | each server's Prometheus route on (llama.cpp: `--metrics`), and a line per model in the agent's `targets.json`. Per-request records come from `captures-pull` (last row); `/logs/stream/http` is not read |
 | Your own Python agents | OTLP from the OTel SDK | GenAI spans + metrics | `OTEL_EXPORTER_OTLP_ENDPOINT=http://telemetry.example:4318` |
 | Local-model requests and responses through llama-swap | the `captures-pull` service reads llama-swap's `/api/metrics/activity` and `/api/captures/{id}` every 15 s (spec 0008) | one record per call: the activity row and its capture, written to `captures/<label>/<YYYY-MM-DD>.jsonl.zst` | `captureBuffer` and `store.path` in the llama-swap config (*Local-model captures*). Files only: never tailed, never in Loki |
+
+The Claude Code and Codex OTLP rows, and the Mac agent in *Flow of records*,
+are the planned live path: spec 0003 deferred `mac-agent/otel-agent.yaml` and
+the clients' user-level OTel settings to their own spec, and none of them runs
+yet.
 
 The landing zone is where file-only sources meet: a job on any machine can rsync
 files there. The Collector tails only the ledgers, `landing/*/*/.agentic/delegate/ledger.jsonl`
@@ -558,17 +588,20 @@ Two paths. Both end in the same archive and the same stores.
 |---|---|---|
 | Carries | Claude Code metrics and events, Codex events, your apps' spans | tool-call ledgers, delegate results, session transcripts |
 | Mac side | `mac-agent/otel-agent.yaml`: a Collector on `localhost:4318` with a disk-backed queue and a local JSONL copy | `mac-agent/ship-ledgers.sh` (every 15 min from launchd, from 0006): rsync over SSH (LAN or Tailscale) into `landing/<host>/`, or `--dest DIR` into a local landing zone |
-| Offline | the queue fills on disk and drains when the VM is reachable; the local copy is written regardless | the script prints one line and exits 0 (1 if discovery found a name collision or a symlinked `.agentic`); the next run catches up. Files never change after a session ends, so nothing is lost |
+| Offline | the queue fills on disk and drains when the VM is reachable; the local copy is written regardless | the script prints one line and exits 0 (1 when a copy failed or a project was skipped; `--help` lists the cases); the next run catches up. Files never change after a session ends, so nothing is lost |
 | Authoritative? | best effort: the queue has a cap and the clients drop on their own if no agent is listening | yes: the ledger and transcript files are the record of truth |
 
-Rule: **clients point at localhost, never at the VM.** The Mac agent is the only
-process that knows the VM's address. Sessions run with a local model and no network at
+Rule: **clients point at localhost, never at the VM.** Among OTLP senders on the
+Mac, only the Mac agent knows the VM's address; the ship script (`TELEMETRY_VM`)
+and the inference host agent (`TELEMETRY_OTLP_ENDPOINT`) carry it in their own
+settings. Sessions run with a local model and no network at
 all (Pi on Ollama on the laptop) produce only files, so the batch path alone covers them.
 
 Timeline for one session:
 
 1. During the session: Claude Code pushes OTLP to the Mac agent; the scaffold hook
-   appends to `.agentic/telemetry/<session>.jsonl`. Both are local writes.
+   appends to `.agentic/telemetry/<session>.jsonl` (once the scaffold's Phase 1
+   lands). Both are local writes.
 2. Within minutes, when the VM is reachable: the agent drains its queue; the ship
    script rsyncs new ledger lines and transcripts into the landing zone.
 3. On the VM, continuously: the Collector tails the landing zone's ledgers and writes
@@ -585,14 +618,15 @@ Timeline for one session:
    https://grafana.com/docs/loki/v3.7.x/operations/request-validation-rate-limits/),
    so a fresh VM's first ship cycle backfills every ledger line into Loki as well
    as the archive.
-4. Nightly: the analysis package rebuilds the run table and matrices from the archive
-   and landing zone into Parquet.
+4. Planned, not built: a nightly job rebuilds the run table and matrices into
+   Parquet. Today `run-table` and `session-table` run by hand on the Mac, against
+   project roots or a landing-zone copy, into the ignored `data/`.
 
 ## Retention policy, in one place
 
 | Layer | Keeps | Controlled by |
 |---|---|---|
-| Archive (`<signal>.jsonl*.zst`) | forever | you; prune by hand or move to NAS cold storage |
+| Archive (`<signal>.jsonl*.zst`) | forever in practice: rotated files are kept up to 3650 days and 100000 files (`rotation` in `otel-collector.yaml`) | you; prune by hand or move to NAS cold storage |
 | VictoriaMetrics | 5 years | `-retentionPeriod` flag |
 | Loki | 2 years | `limits_config.retention_period` + compactor |
 | Tempo | 90 days | `compactor.compaction.block_retention` |
@@ -602,7 +636,8 @@ Timeline for one session:
 
 Derived stats (per-session and per-run summary rows, the per-model failure matrix)
 are computed by the Python package in this repo from the archive and the landing zone, and
-written to a DuckDB/Parquet set that is itself backed up. Those rows are what you
+written to Parquet under the ignored `data/` on the Mac, which this repository
+does not back up; the failure matrix is not built yet. Those rows are what you
 look at in a year; the raw records are what you go back to when a number looks wrong.
 
 ## Bring-up order
@@ -1006,6 +1041,14 @@ Not yet done:
 - B10, reachability over the Tailnet and from outside both networks (deferred);
 - a NAS copy of `archive/` and Grafana data sources, outside spec 0006 (PBS
   backs up the VM daily, managed from the homelab repository);
-- the Codex `[otel]` exporter syntax;
-- spec 0008's day and week size readings, then `captureBuffer` resizing and
-  capture retention.
+- the live OTLP path: `mac-agent/otel-agent.yaml` on the Mac and the clients'
+  user-level OTel settings (deferred by spec 0003 to its own spec); the Codex
+  `[otel]` exporter syntax is still unverified;
+- the scaffold's Phase 1 tool-call ledgers: the Collector's
+  `.agentic/telemetry/*.jsonl` include has not yet tailed a real one;
+- the first archive rotation, to confirm the rotated file name (*Pipelines*);
+- spec 0008's day and week size readings, then `captureBuffer` resizing,
+  capture retention and pruning of llama-swap's activity store;
+- rebuilding `captures-pull` on the VM from the uv 0.13.1 `captures/Dockerfile`
+  and `pyproject.toml` (the running image was built from commit 2818a3d with uv
+  0.11.33).

@@ -1,7 +1,14 @@
 # 0001 — DuckDB as the Parquet Writer and Query Engine Over File-Based Evidence
 
 **Status:** accepted
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
+
+> Note 2026-10-22: DuckDB writes the run and session tables (specs 0001, 0002)
+> and reads the session table for `captures show` (spec 0008). The unit 3 join
+> (spec 0005) did not use an `ASOF JOIN`: it asks VictoriaMetrics for each run
+> window in plain Python (`server_metrics/`), the window query ADR 0002
+> anticipated. The unit 2 matrix is not built yet, so the group-by/pivot
+> consequence is still untested.
 
 > The collector `inbox/` was renamed `landing/` (landing zone) on 2026-10-21.
 > This record keeps the name it was written with.

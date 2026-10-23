@@ -2,6 +2,9 @@
 
 > Status: design draft, 2026-10-21. Answers the question "do I review telemetry, run
 > public benchmarks, or write my own evals?" The answer is all three, each with one job.
+> Since built: the run table and server-metrics join (specs 0001, 0005, 0009), the
+> session table (0002) and local-model captures (0008). Not built: the transition
+> matrix, task candidates and the review app.
 
 ## Three instruments, three jobs
 
@@ -11,10 +14,11 @@
 | **Public benchmarks** (Terminal-Bench sample via Harbor) | Sanity-check a served configuration. Catch a quant, runtime or sampling change that broke tool calling before it costs you a day | whether a new server-side setup is admissible | medium, hours | on every runtime, quant or sampling change |
 | **Private evals** (replay fixtures + tasks mined from your PR history) | Decide. Rank configurations on your own code, under the scaffold's rules | which model/config gets delegation for which bucket | high per run; repetitions needed | per new candidate; on scaffold changes to delegation |
 
-The vault already holds the second and third: the Harbor runbook, the ROMED8-2T replay
-plan (Fixture A boundary test, Fixture B repair test), and the evals-FAQ takeaways
-(first-failure labels, transition matrix, pass^k). The gap is the first: nothing joins
-agent-side records to server-side records today.
+Private notes already cover the second and third: a Harbor runbook, a replay plan
+(Fixture A boundary test, Fixture B repair test), and the evals-FAQ takeaways
+(first-failure labels, transition matrix, pass^k). The gap was the first: agent-side
+records joined to server-side ones. Spec 0005 closed it for delegate runs
+(`run-table --metrics-url`); interactive sessions are not joined yet.
 
 **Order of operations:** review telemetry first and let it choose the tasks. The evals
 FAQ's rule is that an eval is written for a failure you have seen fire, not one you
@@ -48,12 +52,14 @@ Server metrics that carry signal (llama.cpp `--metrics`, names verified 2026-10-
 | `llamacpp:prompt_tokens_seconds`, `predicted_tokens_seconds` | prefill and decode throughput; decode collapse at long context is a quant/offload problem, not a model problem |
 | `llamacpp:requests_deferred`, `requests_processing` | queueing; a deferred request looks like a slow model from the agent side |
 | `llamacpp:n_busy_slots_per_decode` | batching; relevant once more than one worker runs |
-| `/slots` (polled, not Prometheus) | per-slot `n_ctx`, sampling params actually in effect; the ground truth for "what did the server really use" |
-| llama-swap `/logs/stream/http` | one line per request: the only per-request record at the gateway; capture to the landing zone |
+| `/slots` (not Prometheus; not polled yet) | per-slot `n_ctx`, sampling params in effect; the ground truth for "what did the server really use" |
+| llama-swap `/api/metrics/activity` + `/api/captures/{id}` (spec 0008) | every call's full request and response: the system prompt, tool schemas, re-sent history and sampling settings the client sent, and the raw stream; `captures show` joins calls to sessions |
 | llama-swap model swap events (upstream log) | first-request load time; shows up on the agent side as a timeout or a 600 s "thinking" |
 
-Strata and Project Maya are llama.cpp-derived; confirm which of these endpoints each
-build exposes, and record it in `ENDPOINTS.md`.
+Strata and Project Maya are llama.cpp-derived. Which of these endpoints each build
+exposes is recorded in `collector/README.md` → Inference server endpoints: Strata
+serves Prometheus text and is scraped (spec 0007); Project Maya v1.1.4 serves JSON
+only and is uncovered. Stored names replace `:` with `_` (`llamacpp_prompt_tokens_total`).
 
 ## Pattern catalog: what to look for, and which side to fix
 
@@ -75,10 +81,14 @@ variable. When either is no, fix the plumbing before touching the model.
 
 ## Outputs this repo will produce
 
-1. **Run table.** One row per delegate run or eval run: fingerprint, bucket, task,
-   outcome, first-failure phase, agent seconds, grading seconds, tokens in/out,
-   decode tokens/s during the run, context high-watermark, swap wait. Source:
-   `ledger.jsonl` + `result.json` + VictoriaMetrics window queries. Stored as Parquet.
+1. **Run table** (built: specs 0001, 0005, 0009). One row per delegate run:
+   fingerprint, bucket, outcome, first-failure phase and cause, agent and wall
+   seconds, review verdict, transcript tokens (subagents included) and, with
+   `--metrics-url`, the server's tokens, prefill and decode tokens/s, context
+   high-water mark, deferred requests and a cold-start flag. Source:
+   `ledger.jsonl`, `result.json`, `state.json`, Pi transcripts and
+   VictoriaMetrics window queries. Stored as Parquet. Not built: eval-run rows,
+   a task column, grading seconds.
 2. **Transition failure matrix** per fingerprint: rows = last phase that succeeded,
    columns = first phase that failed (spec, plan, test-first, implement, gate, review).
 3. **Server health during runs**: throughput and context per run, so a model
@@ -86,6 +96,10 @@ variable. When either is no, fix the plumbing before touching the model.
    trusted.
 4. **Task candidates**: recurring failure clusters from (2), each one a seed for a
    private task (parent-commit rollback, terse prompt + long-context variant).
+
+Also built: the session table (spec 0002), one row per Pi, Claude Code or Codex
+session, and local-model captures (spec 0008), each llama-swap call's request
+and response joined to its session.
 
 ## Not now
 
