@@ -9,7 +9,8 @@ Rules, in order:
    A call's names are llama-swap's `model` plus the request body's `model`; a
    session's come from 0005's `resolve_model`. Between a claimant and its
    ancestor, the descendant keeps the call only when the call overlaps the
-   descendant's own, unpadded span; in the pad the ancestor keeps it. Two or
+   descendant's own, unpadded span, taking the latest start the call could have
+   had (`TIMESTAMP_PRECISION`); in the pad the ancestor keeps it. Two or
    more unrelated claimants are all kept and flagged `ambiguous`.
 3. Otherwise the call is unclaimed. A header that named no session adds
    `header_unmatched` to whatever rule 2 decided.
@@ -29,6 +30,11 @@ from agentic_telemetry.server_metrics.resolve import resolve_model
 
 # Allows for clock skew between the inference host and the client's machine.
 PAD = timedelta(seconds=5)
+# llama-swap v264's SQLite store (`store.path`) keeps a call's end in whole
+# seconds (the in-memory store keeps nanoseconds), so a whole-second end may
+# be up to this much early, and end minus duration starts the call too soon. A
+# parent's next call after a child returns then starts inside the child's span.
+TIMESTAMP_PRECISION = timedelta(seconds=1)
 AMBIGUOUS = "ambiguous"
 HEADER_UNMATCHED = "header_unmatched"
 
@@ -48,6 +54,7 @@ class _Call:
 
     start: datetime
     end: datetime
+    latest_start: datetime
     models: frozenset[str]
     header: str | None
 
@@ -66,9 +73,11 @@ def _parse_call(record: Mapping[str, object]) -> _Call:
     capture = record.get("capture")
     names = {request_model(capture), activity.get("model")}
     header = session_header(capture.get("req_headers")) if isinstance(capture, dict) else None
+    start, end = record_start(record), record_end(record)
     return _Call(
-        start=record_start(record),
-        end=record_end(record),
+        start=start,
+        end=end,
+        latest_start=min(start + TIMESTAMP_PRECISION, end) if end.microsecond == 0 else start,
         models=frozenset(name for name in names if isinstance(name, str) and name),
         header=header,
     )
@@ -133,6 +142,13 @@ def _overlaps(call: _Call, window: SessionWindow, pad: timedelta) -> bool:
     return call.start <= window.end + pad and call.end >= window.start - pad
 
 
+def _inside_unpadded(call: _Call, window: SessionWindow) -> bool:
+    """True when the call, at its latest possible start, meets the session's own span."""
+    if window.start is None or window.end is None:
+        return False
+    return call.latest_start <= window.end and call.end >= window.start
+
+
 def _by_time_and_model(
     call: _Call,
     windows: Sequence[tuple[SessionWindow, frozenset[str]]],
@@ -149,7 +165,7 @@ def _by_time_and_model(
         above = _ancestors(session_id, parents) & claimants.keys()
         if not above:
             continue
-        if _overlaps(call, window, timedelta(0)):
+        if _inside_unpadded(call, window):
             dropped |= above
         else:
             dropped.add(session_id)

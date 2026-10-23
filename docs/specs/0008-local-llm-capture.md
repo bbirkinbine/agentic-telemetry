@@ -510,7 +510,9 @@ Where the approved plan says otherwise, these govern.
   reader skips an unreadable frame with a warning naming the file.
 - **Child window.** A descendant session beats its ancestor only for a call
   that overlaps the descendant's own (unpadded) window; in the 5 s pad the
-  ancestor keeps it.
+  ancestor keeps it. Amended after the real-session check (*Phase B result*):
+  the call's start for this test is the latest it could have been, because
+  llama-swap stores the end in whole seconds.
 - **Build pin.** The image copies uv 0.11.33 (index digest
   `sha256:77280f2f771df71f90786c314fe1bbc1e023feac652969bbf139c280babf2eb7`,
   released 2026-07-28), inside `pyproject.toml`'s `uv_build>=0.11,<0.12`, so
@@ -577,6 +579,21 @@ once its counts are recorded.
   - step 4, the restart check (ids continue, no reset, id 4 saved);
   - step 5, coverage: llama.cpp, Strata and Maya each saved, with real token
     counts and complete reassembly.
+- Real-session check: a Pi session in one of the owner's private projects on
+  Maya-L, 3 h 47 min with 6 subagent runs. `captures show --session` claimed
+  all 439 of its calls, 0 ambiguous, by time and model (Pi sent no session
+  header).
+  - It found a join defect. In 4 of the 6 subagent runs, the parent's first
+    call after the child returned was claimed by the child. End minus duration
+    put its start 0.1-0.5 s before the child's last turn, because the end is
+    truncated to the second.
+  - Fixed: the child-keeps test uses the latest start the call could have
+    had, capped at its recorded end (`join.TIMESTAMP_PRECISION`). A regression
+    test is `test_the_parents_next_call_after_a_child_ends_stays_with_the_parent`.
+  - After the fix each child's call count equals its assistant turns. The
+    parent has 8 more calls than turns: 2 answered 429 (llama-swap captured
+    those too) and 6 with no assistant turn in the transcript, left for a later
+    look.
 - Step 6, Pi's session headers, is optional and not done.
 - Steps 7 and 8, the day and week sizes: outstanding. The spec stays `shipping`
   until they are recorded.

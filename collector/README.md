@@ -984,6 +984,14 @@ Validated today with the pinned images, on the Mac, via Docker:
     - One more call to `local-qwen38-27b` (200 in 20 s) got id 4. The
       harvester logged `poll: rows=1 saved=1 evicted=0 no_capture=0
       id_reset=0`, and the cursor moved to `last_id` 4 in epoch 0.
+  - **Real session.** A 3 h 47 min Pi session on `local-glm53-maya-l` with 6
+    subagent runs made 439 calls (ids 5-443). The harvester saved all 439,
+    with 0 `evicted`, `no_capture` or `error`, each within one poll.
+    - After an `rsync` and a fresh `session-table`, `captures show --session`
+      claimed every call to the session or one of its subagents, 0 ambiguous.
+    - Each subagent's call count equals its assistant turns, once the join fix
+      in spec 0008's *Phase B result* is applied.
+    - All 443 calls so far take 44.0 MB compressed (about 99 KB a call).
   - Still to do: a day's and a week's sizes (step 7): the `evicted` total, the
     compressed capture size, and the SQLite store's growth.
 

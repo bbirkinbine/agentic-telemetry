@@ -11,8 +11,10 @@ unrelated claimants are both kept and flagged `ambiguous`. Interfaces: see
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
+import pytest
 from capture_builders import ALIAS_QWEN, FLASH, QWEN, at, session_row, write_sessions
 from capture_join_helpers import call, claims, owners, seconds
 
@@ -80,6 +82,43 @@ def test_child_session_wins_over_its_ancestors(tmp_path: Path) -> None:
     assert owners(result[3]) == {"pi-grandchild"}
     assert owners(result[4]) == {"pi-parent"}
     assert not [item for item in result.values() if set(item.flags)]
+
+
+def test_the_parents_next_call_after_a_child_ends_stays_with_the_parent(tmp_path: Path) -> None:
+    # Found on a real session: llama-swap stores the call end in whole seconds,
+    # so end minus duration can land up to 1 s before the call's true start.
+    sessions = [
+        session_row("pi-parent", at(10), at(10, 40)),
+        session_row("pi-child", at(10, 10), at(10, 20, 0, 400_000), parent="pi-parent"),
+    ]
+    child_last = call(1, at(10, 20), duration_ms=30_000)  # true end 10:20:00.4
+    parent_next = call(2, at(10, 20, 6), duration_ms=6_200)  # true run 10:20:00.7-10:20:06.9
+
+    result = claims(tmp_path, sessions, [child_last, parent_next])
+
+    assert owners(result[1]) == {"pi-child"}
+    assert owners(result[2]) == {"pi-parent"}, "the computed start 10:19:59.8 is truncation"
+
+
+@pytest.mark.parametrize(
+    ("end", "duration_ms", "child_end"),
+    [
+        (at(10, 20, 6, 300_000), 5_800, at(10, 20, 0, 600_000)),
+        (at(10, 20), 300, at(10, 20, 0, 400_000)),
+    ],
+    ids=["sub-second-end-is-exact", "short-call-start-capped-at-its-end"],
+)
+def test_a_childs_own_last_call_stays_with_the_child(
+    tmp_path: Path, end: datetime, duration_ms: int, child_end: datetime
+) -> None:
+    sessions = [
+        session_row("pi-parent", at(10), at(10, 40)),
+        session_row("pi-child", at(10, 10), child_end, parent="pi-parent"),
+    ]
+
+    result = claims(tmp_path, sessions, [call(1, end, duration_ms=duration_ms)])
+
+    assert owners(result[1]) == {"pi-child"}
 
 
 def test_overlapping_unrelated_sessions_on_one_model_are_both_listed_as_ambiguous(
