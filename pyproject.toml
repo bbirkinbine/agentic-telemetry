@@ -13,7 +13,7 @@ agentic-telemetry = "agentic_telemetry.cli:main"
 # A build backend makes `uv sync` install src/agentic_telemetry into the venv,
 # so tests can import it. Without one uv treats the project as virtual.
 [build-system]
-requires = ["uv_build>=0.11,<0.12"]
+requires = ["uv_build>=0.13.1,<0.14"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]

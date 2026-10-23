@@ -46,12 +46,13 @@ SPEC_INDEX_DIGESTS = {
     "grafana/loki:3.7.9": "0db216b630ae1f348a1584c67f3cead8b4c1fc839169a39501db664744158e28",
     "grafana/tempo:2.10.10": "12b0820f13ffa10ce956b6e9acc3b03f3cffded99109be6cc09d106fe56e5d38",
 }
-# Spec 0008: harvester base images, index digests read 2026-10-22 (uv per the review resolutions).
+# Spec 0008: harvester base images, index digests read 2026-10-22 (uv matches the
+# pyproject.toml uv_build range, so the image build downloads no backend).
 DOCKERFILE_IMAGES = (
     "python:3.12-slim-bookworm@sha256:"
     "6a0e06f5ba0b373d051aabd3fffb9b873f27f9a2a3a14bcbe37dee6f0e3bbc70",
-    "ghcr.io/astral-sh/uv:0.11.33@sha256:"
-    "77280f2f771df71f90786c314fe1bbc1e023feac652969bbf139c280babf2eb7",
+    "ghcr.io/astral-sh/uv:0.13.1@sha256:"
+    "4a1f3666816dafadd20ceb71eac9a7d56d7ef30279f7d64048519ab901ada336",
 )
 COMPOSE_VARIABLE = re.compile(r"(?<!\$)\$(?:\{([A-Za-z_][A-Za-z0-9_]*)|([A-Za-z_][A-Za-z0-9_]*))")
 COLLECTOR_ENV_REF = re.compile(r"\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}")
