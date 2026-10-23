@@ -1,5 +1,6 @@
-"""Command line: `agentic-telemetry run-table --out PATH DIR... [--metrics-url URL]` and
-`agentic-telemetry session-table --out PATH [DIR...]`."""
+"""Command line: `agentic-telemetry run-table --out PATH DIR... [--metrics-url URL]`,
+`agentic-telemetry session-table --out PATH [DIR...]`, and the llama-swap capture
+commands `captures-pull` and `captures show` (`captures/cli_commands.py`)."""
 
 import argparse
 import os
@@ -9,6 +10,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from agentic_telemetry.captures.cli_commands import (
+    COMMANDS as CAPTURE_COMMANDS,
+)
+from agentic_telemetry.captures.cli_commands import (
+    add_capture_parsers,
+    run_capture_command,
+)
+from agentic_telemetry.captures.llama_swap_api import ApiFetch, urlopen_api_fetch
 from agentic_telemetry.run_table.build import build_run_table
 from agentic_telemetry.run_table.dedupe import ConflictingRunError
 from agentic_telemetry.run_table.discovery import NoLedgerError
@@ -161,6 +170,7 @@ def _parser() -> argparse.ArgumentParser:
         metavar="DIR",
         help="session directory, project root or landing-zone copy; omit to use the defaults",
     )
+    add_capture_parsers(commands)
     return parser
 
 
@@ -243,7 +253,11 @@ def _session_table(dirs: Sequence[Path], out: Path) -> int:
     return 0
 
 
-def main(argv: Sequence[str] | None = None, fetch: Fetch | None = None) -> int:
+def main(
+    argv: Sequence[str] | None = None,
+    fetch: Fetch | None = None,
+    api_fetch: ApiFetch | None = None,
+) -> int:
     """Run the command line and return its exit code.
 
     Exit codes: 0 on success (warnings included), 1 when the inputs cannot be
@@ -253,6 +267,7 @@ def main(argv: Sequence[str] | None = None, fetch: Fetch | None = None) -> int:
         argv: Arguments without the program name; defaults to `sys.argv[1:]`.
         fetch: The HTTP seam for `--metrics-url`; defaults to the stdlib GET.
             Tests pass a stub, so no test needs a listening port.
+        api_fetch: The HTTP seam for `captures-pull`; defaults to the stdlib GET.
     """
     parser = _parser()
     args = parser.parse_args(argv)
@@ -264,5 +279,9 @@ def main(argv: Sequence[str] | None = None, fetch: Fetch | None = None) -> int:
         return _run_table(dirs, out, metrics_url, fetcher)
     if args.command == "session-table" and out is not None:
         return _session_table(dirs, out)
+    if args.command in CAPTURE_COMMANDS:
+        code = run_capture_command(args, api_fetch if api_fetch is not None else urlopen_api_fetch)
+        if code is not None:
+            return code
     parser.print_help(sys.stderr)
     return 2

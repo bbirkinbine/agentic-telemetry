@@ -68,3 +68,6 @@ data/
 # only the placeholder example is tracked.
 collector/inference-agent/targets*.json
 !collector/inference-agent/targets.example.json
+
+# Spec 0008: harvested llama-swap captures are evidence, never committed.
+/captures/

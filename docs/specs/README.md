@@ -37,6 +37,7 @@ line; the source of truth is the spec file, this is a rendered cache. Run
 - ~~[0005 — Server-Metrics Join](0005-server-metrics-join.md)~~  (shipped) — depends on 0003, 0007
 - ~~[0006 — Telemetry VM Deployment](0006-telemetry-vm-deploy.md)~~  (shipped) — depends on 0003, 0004
 - ~~[0007 — Host-Local Model Metrics Scraper](0007-host-local-model-metrics.md)~~  (shipped) — depends on 0003
+- ~~[0008 — Local-Model Request and Response Capture](0008-local-llm-capture.md)~~  (shipped) — depends on 0006
 - ~~[0009 — Count Subagent Usage in Pi Transcripts](0009-subagent-usage.md)~~  (shipped) — depends on 0001, 0005
 <!-- specs-status:end -->
 

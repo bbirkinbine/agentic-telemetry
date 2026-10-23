@@ -9,7 +9,8 @@ import re
 
 from collector_files import (
     README,
-    compose_services,
+    dockerfile_image_references,
+    image_services,
     markdown_section,
     markdown_tables,
     read_text,
@@ -19,6 +20,7 @@ from collector_files import (
 RUN_LOCALLY = r"\brun locally on the mac\b"
 IMAGES = r"\bimages\b"
 ENDPOINTS = r"\binference\b.*\bendpoints?\b"
+CAPTURES = r"\blocal-model captures\b"
 PLACEHOLDER_CELLS = {"", "-", "?", "tbd", "todo", "unknown", "n/a"}
 # Runtime users stated in the spec's Notes (images checked 2026-10-21).
 SPEC_IMAGE_USERS = {
@@ -42,12 +44,17 @@ def has_word(text: str, word: str) -> bool:
 
 
 def image_rows() -> dict[str, tuple[list[str], list[str]]]:
-    """Map each compose image reference to `(header, row)` from the README Images table."""
+    """Map each pulled image to `(header, row)` from the README Images table.
+
+    Pulled images are the compose `image:` references plus the harvester
+    Dockerfile's `FROM` and `COPY --from` images (spec 0008); a `build:` service
+    has no image of its own.
+    """
     tables = markdown_tables(readme_section(IMAGES))
     assert tables, "expected a table under the README Images heading"
     found: dict[str, tuple[list[str], list[str]]] = {}
-    for service in compose_services().values():
-        reference = str(service.get("image", ""))
+    pulled = [str(service.get("image", "")) for service in image_services().values()]
+    for reference in [*pulled, *dockerfile_image_references()]:
         name_tag, _, digest = reference.partition("@sha256:")
         name, _, tag = name_tag.rpartition(":")
         for table in tables:
@@ -138,3 +145,22 @@ def test_endpoints_section_records_metrics_and_slots_exposure() -> None:
     body = readme_section(ENDPOINTS)
     for endpoint in ("/metrics", "/slots"):
         assert endpoint in body, f"expected the endpoints section to record {endpoint}"
+
+
+def test_images_table_has_rows_for_the_harvester_base_images() -> None:
+    rows = image_rows()
+    for name in ("python", "ghcr.io/astral-sh/uv"):
+        assert [ref for ref in rows if ref.split(":")[0] == name], (
+            f"expected an Images row for the harvester's {name} image"
+        )
+
+
+def test_captures_section_records_the_llama_swap_settings_and_loss_counts() -> None:
+    body = readme_section(CAPTURES)
+    for token in ("captureBuffer", "1024", "store.path", "evicted", "no_capture"):
+        assert has_word(body, token), f"expected {token!r} in the local-model captures section"
+
+
+def test_captures_section_names_the_session_header_setting() -> None:
+    body = readme_section(CAPTURES)
+    assert "sendSessionAffinityHeaders" in body, "expected Pi's optional header setting"

@@ -1,7 +1,7 @@
 # 0000 — agentic-telemetry
 
 **Status:** evergreen
-**Last updated:** 2026-10-21
+**Last updated:** 2026-10-22
 
 ## Problem
 
@@ -29,6 +29,9 @@ leaderboards; this only has to answer questions about my own setup.
   automatically, including runs from offline sessions.
 - A new local model or quant is admitted to or rejected from a bucket from numbers
   across repeated runs, not from one good-looking run.
+- When a local-model run goes wrong, I can read exactly what the model received
+  and returned on each turn (system prompt, tools, re-sent history, sampling,
+  raw response), so a harness or packet change is chosen from evidence.
 
 ## Kill criteria
 
@@ -49,6 +52,10 @@ leaderboards; this only has to answer questions about my own setup.
 - Live viewing of Pi sessions.
 - A benchmark harness of my own; Harbor and the public task sets are reused as-is.
 - Anything multi-user or hosted.
+- Exact request and response capture for frontier models. Their transcripts are
+  enough for this project's questions, and the provider's side (added content,
+  full reasoning, the rendered prompt) cannot be seen anyway. Full capture is for
+  local models only (spec 0008).
 - Changes to how the scaffold's gate, review, or delegation decide pass or fail;
   those live in the scaffold repo.
 
@@ -70,6 +77,24 @@ leaderboards; this only has to answer questions about my own setup.
   `Projects/Agentic Scaffold Telemetry/`); this repo reads it and adapts when real
   payloads differ.
 
+## Upstream dependencies
+
+Formats and APIs this repo reads but does not own. When one changes upstream,
+the specs listed against it are the ones to re-check.
+
+| Source | What is read | Pinned at | Read by |
+| --- | --- | --- | --- |
+| agentic-scaffold delegate runner | `.agentic/delegate/ledger.jsonl` (records and phase names), `results/<run>/result.json` and `state.json` | the record shapes in spec 0001 | 0001, 0004 (copies them), 0005, 0009 |
+| agentic-scaffold delegate runner | the `results/<run>/session/` layout, which gives a transcript its `run_id` | `session_table/discovery.py` `delegate_run_id`; `run_table` reads `session/*.jsonl` | 0001, 0002, 0004 (copies it), 0008 (`captures show RUN_ID`), 0009 |
+| agentic-scaffold Phase 1 | the tool-call ledger | not started upstream | the rest of roadmap unit 2 (blocked) |
+| agentic-scaffold (later, optional) | a run-ID request header from the delegate runner | not planned | would make 0008's join exact for delegate runs |
+| agentic-scaffold as tooling | `.agentic/` hooks and gate, `/delegate`, the standing-rules block in `AGENTS.md` | refreshed by `bootstrap.sh --update` | every spec's workflow, no data |
+| Pi | session transcripts, `subagent` tool results, the `compat.sendSessionAffinityHeaders` session header | Pi 1.3.0 | 0001, 0002, 0004 (copies them), 0005, 0008, 0009 |
+| Claude Code, Codex | session transcripts (Codex also `.jsonl.zst`) | the formats in spec 0002 | 0002, 0004 (copies them) |
+| llama-swap | its own `/metrics`; `/api/metrics/activity` and `/api/captures/{id}`, the capture JSON and its redacted headers | v264 | 0003, 0007 (avoids `/upstream/`, which resets a model's TTL), 0008 |
+| llama.cpp, Strata, Project Maya | per-model metrics endpoints and their series names (Maya's `/metrics` is JSON, so it is uncovered); their chat-completions response streams | the builds recorded in `collector/README.md` | 0003, 0005, 0007, 0008 (stream reassembly) |
+| Collector stack images | OpenTelemetry Collector, VictoriaMetrics, Loki, Tempo, and the capture harvester's Python and uv bases | digests in `collector/compose.yaml`, `collector/inference-agent/compose.yaml`, `collector/captures/Dockerfile` and the README's Images table | 0003, 0006, 0007, 0008 |
+
 ## Roadmap pointers
 
 1. Run table from delegate evidence: given a list of scaffold-bootstrapped project
@@ -89,6 +114,10 @@ leaderboards; this only has to answer questions about my own setup.
    (telemetry VM deployment), 0007 (host-local model metrics scraper).
 4. Later: the review and labeling app; the Langfuse importer and optional viewer
    (useful for employability as well as browsing; see `analysis/README.md`).
+5. Local-model request and response capture: keep llama-swap's per-call captures
+   of every local-model request and response as files, and join them to sessions
+   and runs, so a session can be read turn by turn as the model saw it. Spec: 0008. The rendered
+   chat-template prompt is a later layer.
 
 ## Open questions
 
